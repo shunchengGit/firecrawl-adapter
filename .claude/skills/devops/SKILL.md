@@ -1,12 +1,12 @@
 ---
 name: devops
-description: MockFirecrawl 项目的研发运维工具集。用于启停 SearXNG/adapter 服务、查看状态与日志、运行测试与检查、管理 agent-browser 登录态、重配端口等日常 devops 操作。当用户提到"启动/停止服务""看日志""跑测试""检查健康""登录站点注入 cookie""改端口"等本项目的运维需求时使用。
+description: firecrawl-adapter 项目的研发运维工具集。用于启停 SearXNG/adapter 服务、查看状态与日志、运行测试与检查、管理 agent-browser 登录态、重配端口等日常 devops 操作。当用户提到"启动/停止服务""看日志""跑测试""检查健康""登录站点注入 cookie""改端口"等本项目的运维需求时使用。
 cli_version: ">=1.0.0"
 ---
 
-# MockFirecrawl DevOps Skill
+# firecrawl-adapter DevOps Skill
 
-本 skill 封装 MockFirecrawl 项目的日常研发运维操作。所有脚本位于 `scripts/`，从项目根目录运行。
+本 skill 封装 firecrawl-adapter 项目的日常研发运维操作。所有脚本位于 `scripts/`，从项目根目录运行。
 
 ## 首次安装（一键）
 

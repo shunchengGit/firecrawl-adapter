@@ -98,7 +98,7 @@ if grep -q "AGENT_BROWSER_SESSION_NAME" "$ZSHRC" 2>/dev/null; then
 else
   echo "  → 写入 ~/.zshrc"
   echo '' >> "$ZSHRC"
-  echo '# agent-browser 默认 session（MockFirecrawl）' >> "$ZSHRC"
+  echo '# agent-browser 默认 session（firecrawl-adapter）' >> "$ZSHRC"
   echo 'export AGENT_BROWSER_SESSION_NAME=firecrawl-adapter' >> "$ZSHRC"
   echo "  ✓ 已添加，新终端生效；当前终端运行: source ~/.zshrc"
 fi

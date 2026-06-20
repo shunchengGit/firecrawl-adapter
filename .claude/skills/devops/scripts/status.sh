@@ -13,7 +13,7 @@ echo
 echo "=== adapter (port ${ADAPTER_PORT}) ==="
 if curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" 2>/dev/null; then
   echo "  ✓ healthy"
-  [ -f /tmp/mockfirecrawl-adapter.pid ] && echo "  pid: $(cat /tmp/mockfirecrawl-adapter.pid)"
+  [ -f /tmp/firecrawl-adapter.pid ] && echo "  pid: $(cat /tmp/firecrawl-adapter.pid)"
 else
   echo "  ✗ down"
 fi

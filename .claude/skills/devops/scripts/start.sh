@@ -19,11 +19,11 @@ echo "==> 启动 adapter (port ${ADAPTER_PORT})"
 if curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" -o /dev/null 2>&1; then
   echo "    adapter 已在运行，跳过"
 else
-  nohup ${ADAPTER_PYTHON} -m adapter > /tmp/mockfirecrawl-adapter.log 2>&1 &
-  echo $! > /tmp/mockfirecrawl-adapter.pid
+  nohup ${ADAPTER_PYTHON} -m adapter > /tmp/firecrawl-adapter.log 2>&1 &
+  echo $! > /tmp/firecrawl-adapter.pid
   for i in $(seq 1 10); do
     if curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" -o /dev/null 2>&1; then
-      echo "    adapter ready (pid $(cat /tmp/mockfirecrawl-adapter.pid))"
+      echo "    adapter ready (pid $(cat /tmp/firecrawl-adapter.pid))"
       break
     fi
     sleep 1
