@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一键安装依赖 + 配置环境变量。可重复运行（幂等）。
-# 检查项：Docker、Python 依赖、agent-browser、.env、~/.zshrc 的 AGENT_BROWSER_SESSION_NAME
+# 检查项：Docker、Python 依赖、agent-browser、.env、agent-browser Chrome profile 共享
 set -e
 . "$(dirname "$0")/_env.sh"
 
@@ -90,7 +90,7 @@ echo "    当前配置:"
 grep -v '^#' .env | grep -v '^$' | sed 's/^/      /'
 
 echo
-echo "=== 6/6 配置 ~/.zshrc 的 AGENT_BROWSER_SESSION_NAME ==="
+echo "=== 6/6 配置 agent-browser session 共享 ==="
 ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
 if grep -q "AGENT_BROWSER_SESSION_NAME" "$ZSHRC" 2>/dev/null; then
   echo "  ✓ ~/.zshrc 已配置:"
@@ -98,9 +98,15 @@ if grep -q "AGENT_BROWSER_SESSION_NAME" "$ZSHRC" 2>/dev/null; then
 else
   echo "  → 写入 ~/.zshrc"
   echo '' >> "$ZSHRC"
-  echo '# agent-browser 默认 session（firecrawl-adapter）' >> "$ZSHRC"
+  echo '# agent-browser cookie 共享：所有 session 自动互通' >> "$ZSHRC"
   echo 'export AGENT_BROWSER_SESSION_NAME=firecrawl-adapter' >> "$ZSHRC"
-  echo "  ✓ 已添加，新终端生效；当前终端运行: source ~/.zshrc"
+  echo "  ✓ 已添加"
+fi
+# 确保 config.json 不设 profile（profile 会导致 SingletonLock 并发问题）
+AGENT_CONFIG="$HOME/.agent-browser/config.json"
+if grep -q '"profile"' "$AGENT_CONFIG" 2>/dev/null; then
+  echo '{}' > "$AGENT_CONFIG"
+  echo "  ✓ 已移除 agent-browser profile 配置（避免并发锁）"
 fi
 
 echo

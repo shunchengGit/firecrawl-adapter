@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 停止 adapter + SearXNG（不关 agent-browser daemon）
 . "$(dirname "$0")/_env.sh"
 
 echo "==> 停止 adapter"
@@ -11,12 +12,9 @@ if [ -f /tmp/firecrawl-adapter.pid ]; then
   fi
   rm -f /tmp/firecrawl-adapter.pid
 fi
-# 兜底：按命令名杀
-pkill -f "python3 -m adapter" 2>/dev/null && echo "    pkill 兜底清理" || true
-
-echo "==> 停止 agent-browser daemon"
-agent-browser close --all 2>/dev/null && echo "    browser daemon closed" || true
+pkill -f "python.*-m adapter" 2>/dev/null && echo "    pkill 兜底清理" || true
 
 echo "==> 停止 SearXNG + Redis (Docker)"
 docker compose down
-echo "==> 完成"
+
+echo "==> 完成（agent-browser daemon 未受影响）"

@@ -70,8 +70,8 @@ claude mcp get firecrawl-local  # 详情
 
 ## 踩过的坑 / 非显而易见的事
 
-- **agent-browser 每次抓取后 close** — `scrape_url_headless` 的 `finally` 调 `agent-browser close --all`，确保 cookie 落盘到 session 文件、daemon 状态不漂移。代价是下次抓取要冷启动 Chrome（数秒）。性能不敏感于这个延迟时这样最稳。
-- **agent-browser session 持久化**：`~/.agent-browser/config.json` **不支持** `session_name` 字段（只支持 plugins）。要默认 session 名，设 `AGENT_BROWSER_SESSION_NAME` 环境变量（已在 `~/.zshrc` 里设为 `firecrawl-adapter`）。state 在 `close --all` 时自动保存到 `~/.agent-browser/sessions/<name>-default.json`。
+- **agent-browser 每次抓取后 close 自己的 session** — `scrape_url_headless` 随机生成 `adapter_<8hex>` session 名，finally 里只 close 自己，不杀其他 daemon（Hermes）。session 名随机化避免残留 daemon 冲突。
+- **agent-browser cookie 共享**：`AGENT_BROWSER_SESSION_NAME=firecrawl-adapter`（`~/.zshrc`，`_env.sh` 默认值）使 agent-browser 原生支持跨 session cookie 互通——`close` 时自动保存到 `firecrawl-adapter-<session>.json`，新 session `open` 时自动从最新文件加载。不同 `--session` 各自独立 daemon，无并发冲突。不需共享 Chrome profile，不需 wrapper。
 - **`/healthz` 探测 SearXNG** — 返回 `{"status":"ok"|"degraded","searxng":"up"|"down"}`，不只是 adapter 自身存活。SearXNG 不可达时 status 为 degraded。
 - **crawl 有整体超时** — `ADAPTER_CRAWL_TIMEOUT`（默认 300s）控制单次 crawl 最长运行时间，超时 job 状态变 `timeout`（非 `completed`）。
 - **优雅关闭** — adapter 捕获 SIGTERM/SIGINT，标记运行中 crawl 为 cancelled、关 agent-browser daemon 落盘 cookie、再 shutdown。`server.shutdown()` 在新线程调用避免与 `serve_forever` 死锁。

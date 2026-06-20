@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import urllib.parse
 import urllib.request
+import uuid
 from urllib.parse import urljoin
 
 import requests
@@ -37,10 +38,11 @@ def scrape_url_headless(url: str, timeout: int = 30) -> tuple[str, str]:
         raise RuntimeError("agent-browser not found in PATH")
 
     nav_timeout = max(30, timeout + 10)
+    session = f"adapter_{uuid.uuid4().hex[:8]}"
 
     try:
         result = subprocess.run(
-            [agent_bin, "open", url],
+            [agent_bin, "--session", session, "open", url],
             capture_output=True,
             text=True,
             timeout=nav_timeout,
@@ -53,7 +55,7 @@ def scrape_url_headless(url: str, timeout: int = 30) -> tuple[str, str]:
         final_url = url
         try:
             result = subprocess.run(
-                [agent_bin, "get", "url", "--json"],
+                [agent_bin, "--session", session, "get", "url", "--json"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -66,7 +68,7 @@ def scrape_url_headless(url: str, timeout: int = 30) -> tuple[str, str]:
             pass
 
         result = subprocess.run(
-            [agent_bin, "eval", "document.documentElement.outerHTML"],
+            [agent_bin, "--session", session, "eval", "document.documentElement.outerHTML"],
             capture_output=True,
             text=True,
             timeout=15,
@@ -90,11 +92,11 @@ def scrape_url_headless(url: str, timeout: int = 30) -> tuple[str, str]:
 
         return final_url, html
     finally:
-        # 每次抓取后 close，确保 cookie 落盘到 session 文件，daemon 状态不漂移。
-        # 代价是下次抓取要冷启动 Chrome（数秒）。
+        # 每次抓取后 close 自己的 session，确保 cookie 落盘。
+        # 不关其他 daemon（Hermes 等可能在同时用）。
         with contextlib.suppress(Exception):
             subprocess.run(
-                [agent_bin, "close", "--all"],
+                [agent_bin, "--session", session, "close"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -127,10 +129,10 @@ def check_searxng() -> bool:
     """Quick liveness probe for SearXNG. Returns True if reachable."""
     try:
         req = urllib.request.Request(
-            f"{config.searxng_base}/search?q=test&format=json",
+            config.searxng_base,
             headers={"User-Agent": config.user_agent},
         )
-        with urllib.request.urlopen(req, timeout=3) as r:
+        with urllib.request.urlopen(req, timeout=5) as r:
             r.read()
         return True
     except Exception:
