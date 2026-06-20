@@ -82,19 +82,19 @@ claude mcp get firecrawl-local  # 详情
 - **Docker 镜像里没有 agent-browser** — Dockerfile 只有 Python。headless 兜底只在本地运行模式下可用。不要尝试往镜像里加 agent-browser；构建时 Chromium 安装 + Chrome-for-Testing 下载会因网络限制失败。
 - **`_is_likely_blocked` 阈值（500 字符）** 会对合法的短页面误判（如 `example.com`）。这是为了抓 Cloudflare 挑战页有意为之，但内容极少的页面会有误报。
 - **SearXNG 配置以只读方式挂载** 通过 `docker-compose.yml` —— 本地编辑 `searxng/settings.yml`，重启容器生效。
-- **SearXNG 引擎选择** — 默认加载 243 个引擎会导致超时风暴（`ResultContainer` 过早关闭，正常结果也被丢弃）。当前只启用 6 个：baidu/sogou（weight=2 优先）+ bing/google/duckduckgo/wikipedia（weight=1）。被墙引擎通过代理后可启用（见下）。
-- **SearXNG 代理** — 通过 `outgoing.proxies` 配置全局代理。容器内必须用 `host.docker.internal`（`127.0.0.1` 指向容器自身）。当前代理 `host.docker.internal:7890`（macOS 系统代理端口）。
-- **搜索三层增强**（借鉴 [firecrawl](https://github.com/mendable/firecrawl) 的 `search-query-builder.ts` + `search/v2/index.ts`）：
-  1. **Query 编译** — `compile_search_query()` 把 `includeDomains`/`excludeDomains` 编译为 `site:` / `-site:` 操作符注入 query，上游引擎原生过滤
-  2. **Limit×2 缓冲** — `fetch_limit = min(limit×2, max_search_results×2)`，多取一倍防过滤/去重损失
-  3. **DDG 兜底** — SearXNG 返回空时自动切 DuckDuckGo Lite（纯 HTML 解析，无额外依赖）
+- **SearXNG 引擎选择** — 默认加载 243 个引擎会导致超时风暴。当前 6 个稳定引擎：360search / bing / google / wikipedia / yandex / presearch。百度/搜狗持续 CAPTCHA 已移除，mojeek/ddg 不稳定已禁用。
+- **SearXNG 代理** — `outgoing.proxies` 全局代理。容器内必须用 `host.docker.internal`（`127.0.0.1` 指向容器自身），不能写 `127.0.0.1`。当前代理 `host.docker.internal:7890`。代理解锁 google/wikipedia 等被墙引擎。**直连模式下只有 bing/yandex/360 可用**（~23 条/查询），代理下 ~38 条。
+- **搜索增强**（借鉴 [firecrawl](https://github.com/mendable/firecrawl)）：
+  1. **Query 编译** — `compile_search_query()` 把 `includeDomains`/`excludeDomains` 编译为 `site:` / `-site:` 操作符注入 query
+  2. **Limit×2 缓冲** — `fetch_limit = min(limit×2, max_search_results×2)`，多取一倍防过滤损失
+  3. **Bing 兜底** — SearXNG 返回空时自动切 Bing HTML scrape（国内直连，中文友好）
 - **SearXNG 搜索分页** — `searxng_search()` 当 `limit > 20`（SearXNG 每页默认 20 条）时自动循环获取多页。代理启用后 page 2/3 有真实数据（6 引擎 vs 之前 3 引擎只有 1 页）。支持 `engines`、`categories`、`language` 参数。`handle_search` 接受 `sources: [{type: "web"|"news"|"images"}]` 映射到 SearXNG 分类，响应含 `searchId`（uuid4 hex）供后续反馈。
 
 ## SearXNG
 
 在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml`。
 
-**引擎（6 个）**：baidu(weight=2) sogou(weight=2) bing google duckduckgo wikipedia。百度/搜狗优先（weight 越大越优先），google/ddg 通过代理访问（国内直连被墙）。
+**引擎（6 个）**：360search bing google wikipedia yandex presearch。google/wikipedia 走代理，其余直连可用。百度/搜狗已移除（持续 CAPTCHA）。
 
 `secret_key` 硬编码为 `"hermes-searxng-local"` —— 仅本地用可以，但不要对外暴露。主机端口由 `SEARXNG_PORT` 控制（默认 3671）→ 容器内 8080。
 

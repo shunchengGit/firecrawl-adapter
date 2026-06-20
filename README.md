@@ -145,18 +145,36 @@ Python 包（见 `pyproject.toml`）：
 
 ## 搜索引擎
 
-当前配置（`searxng/settings.yml`）启用了 **6 个引擎**，按权重排序：
+当前配置（`searxng/settings.yml`）启用了 **6 个引擎**：
 
-| 引擎 | Weight | 说明 |
-|------|--------|------|
-| 百度 | 2 | 国内优先 |
-| 搜狗 | 2 | 国内优先 |
-| Bing | 1 | 国际，国内直连 |
-| Google | 1 | 走代理，被墙 |
-| DuckDuckGo | 1 | 走代理，被墙 |
-| Wikipedia | 1 | 走代理，不稳定 |
+| 引擎 | 直连 | 说明 |
+|------|------|------|
+| 360搜索 | ✅ | 国内引擎，稳定 |
+| Bing | ✅ | 国际，国内直连 |
+| Google | ❌ 需代理 | 走代理访问 |
+| Wikipedia | ❌ 需代理 | 走代理访问 |
+| Yandex | ✅ | 俄罗斯引擎，中英文覆盖好 |
+| Presearch | ✅ | 去中心化搜索 |
 
-- 代理配置：`outgoing.proxies: { http/https: "http://host.docker.internal:7890" }`
-- 无代理时需禁用 Google/DDG/Wikipedia（`disabled: true`），否则超时拖垮所有结果
-- 分页：6 引擎下 SearXNG 每页约 18-20 条，page 2/3 有真实数据，`ADAPTER_MAX_SEARCH_RESULTS` 设大即可触发
-- 兜底：SearXNG 返回空时自动切 DuckDuckGo Lite（纯 HTML 解析，无额外依赖）
+### 代理配置
+
+`searxng/settings.yml` 的 `outgoing.proxies` 配置全局代理：
+
+```yaml
+outgoing:
+  proxies:
+    http: "http://host.docker.internal:7890"
+    https: "http://host.docker.internal:7890"
+```
+
+- **必须用 `host.docker.internal`**，不能写 `127.0.0.1`（容器内指向自身）
+- 代理解锁 Google/Wikipedia 等被墙引擎
+- **无代理**：只有 bing/yandex/360 可用（~23 条），Google/Wikipedia 需设 `disabled: true`
+
+### 兜底机制
+
+SearXNG 返回空时自动切 **Bing HTML scrape**（国内直连，中文友好，无额外依赖）。
+
+### 已移除的引擎
+
+百度/搜狗（持续 CAPTCHA）、DuckDuckGo（偶发 CAPTCHA）、Mojeek（偶发超时）
