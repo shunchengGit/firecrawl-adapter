@@ -39,8 +39,12 @@ engines:
     disabled: false
     timeout: 15.0
     weight: 2
+  - name: 360search
+    disabled: false
+    timeout: 15.0
+    weight: 2
 
-  # 国际引擎（走代理，可直连）
+  # 国际引擎（走代理）
   - name: bing
     disabled: false
     timeout: 15.0
@@ -81,7 +85,7 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 6
+  pool_maxsize: 7
   enable_http2: false
   # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
   proxies:
