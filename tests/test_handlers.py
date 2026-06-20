@@ -36,13 +36,15 @@ def test_search_with_language():
 
 
 def test_search_limit_capped():
-    """limit is capped to config.max_search_results."""
-    with patch("adapter.handlers.searxng_search") as mock_search:
+    """fetch_limit is capped to 2× max_search_results (buffer ceiling)."""
+    with patch("adapter.handlers.searxng_search") as mock_search, \
+         patch("adapter.handlers.ddg_search", return_value=[]):
         mock_search.return_value = []
         handlers.handle_search({"query": "test", "limit": 9999})
-        # The limit passed to searxng_search should be capped
         from adapter.config import config
-        assert mock_search.call_args[1]["limit"] <= config.max_search_results
+        fetch_limit = mock_search.call_args[1]["limit"]
+        # fetch_limit = min(9999, max) × 2, capped at max × 2
+        assert fetch_limit == config.max_search_results * 2
 
 
 def test_search_sources_to_categories():
@@ -73,29 +75,79 @@ def test_search_no_sources_uses_default():
     assert mock_search.call_args[1]["categories"] == config.searxng_categories
 
 
-def test_search_domain_filtering():
-    """Domain post-filtering: includeDomains / excludeDomains."""
-    raw_results = [
-        {"title": "A", "url": "https://docs.example.com/a", "content": "..."},
-        {"title": "B", "url": "https://blog.example.com/b", "content": "..."},
-        {"title": "C", "url": "https://other.com/c", "content": "..."},
-    ]
-    with patch("adapter.handlers.searxng_search", return_value=raw_results):
-        res = handlers.handle_search({
-            "query": "test",
-            "includeDomains": ["docs.example.com"],
+def test_search_query_compile_domains():
+    """Domain filters are compiled into the query via compile_search_query."""
+    with patch("adapter.handlers.searxng_search") as mock_search, \
+         patch("adapter.handlers.ddg_search", return_value=[]):
+        mock_search.return_value = ["r1", "r2"]
+        handlers.handle_search({
+            "query": "Python",
+            "includeDomains": ["docs.python.org"],
+            "excludeDomains": ["zhihu.com"],
+            "limit": 5,
         })
-    urls = [r["url"] for r in res["data"]["web"]]
-    assert urls == ["https://docs.example.com/a"]
+        compiled_q = mock_search.call_args[0][0]
+        assert "site:docs.python.org" in compiled_q
+        assert "-site:zhihu.com" in compiled_q
+        assert "Python" in compiled_q
 
-    with patch("adapter.handlers.searxng_search", return_value=raw_results):
-        res = handlers.handle_search({
-            "query": "test",
-            "excludeDomains": ["other.com"],
-        })
-    urls = [r["url"] for r in res["data"]["web"]]
-    assert len(urls) == 2
-    assert "https://other.com/c" not in urls
+
+def test_search_buffer_limit():
+    """SearXNG is queried with 2× limit as buffer."""
+    with patch("adapter.handlers.searxng_search") as mock_search, \
+         patch("adapter.handlers.ddg_search", return_value=[]):
+        mock_search.return_value = ["a"] * 5
+        handlers.handle_search({"query": "test", "limit": 5})
+        # fetch_limit = min(5*2, max_search_results*2)
+        fetch_limit = mock_search.call_args[1]["limit"]
+        assert fetch_limit >= 5  # at least requested
+        assert fetch_limit <= 5 * 2  # at most 2×
+
+
+def test_search_ddg_fallback():
+    """DuckDuckGo fallback when SearXNG returns empty."""
+    with patch("adapter.handlers.searxng_search", return_value=[]), \
+         patch("adapter.handlers.ddg_search") as mock_ddg:
+        mock_ddg.return_value = [
+            {"title": "DDG result", "url": "https://example.com", "content": "..."}
+        ]
+        handlers.handle_search({"query": "rare query", "limit": 3})
+        mock_ddg.assert_called_once()
+
+
+def test_search_no_ddg_when_searxng_has_results():
+    """DDG is NOT called when SearXNG returns results."""
+    with patch("adapter.handlers.searxng_search") as mock_searx, \
+         patch("adapter.handlers.ddg_search") as mock_ddg:
+        mock_searx.return_value = [
+            {"title": "OK", "url": "https://a.com", "content": "x"}
+        ]
+        handlers.handle_search({"query": "test", "limit": 3})
+        mock_ddg.assert_not_called()
+
+
+def test_compile_search_query():
+    """Unit test for the query compiler."""
+    from adapter.fetcher import compile_search_query
+
+    # No domains
+    assert compile_search_query("test") == "test"
+    assert compile_search_query("test", None, None) == "test"
+    assert compile_search_query("test", [], []) == "test"
+
+    # Include only
+    q = compile_search_query("Python", ["docs.python.org", "python.org"])
+    assert q == "Python (site:docs.python.org OR site:python.org)"
+
+    # Exclude only
+    q = compile_search_query("Python", None, ["zhihu.com"])
+    assert q == "Python -site:zhihu.com"
+
+    # Both
+    q = compile_search_query("Python", ["docs.python.org"], ["zhihu.com"])
+    assert "site:docs.python.org" in q
+    assert "-site:zhihu.com" in q
+    assert q.startswith("Python")
 
 
 def test_map_sources_empty_types_ignored():

@@ -7,7 +7,7 @@ import time
 import uuid
 
 from .config import config
-from .fetcher import map_url, scrape_url, searxng_search
+from .fetcher import compile_search_query, ddg_search, map_url, scrape_url, searxng_search
 from .jobs import cancel_job, crawl_worker, create_job, get_job
 
 _log = logging.getLogger("adapter")
@@ -36,32 +36,36 @@ def handle_search(body: dict) -> dict:
     q = body.get("query", "")
     if not q:
         return {"success": False, "error": "Missing query"}
-    limit = min(body.get("limit", 5), config.max_search_results)
+
+    requested = body.get("limit", 5)
+    limit = min(requested, config.max_search_results)
     language = body.get("lang") or body.get("language")
     categories = _map_sources_to_categories(body.get("sources"))
 
+    # 1. Compile domain filters into the query (site: / -site: ops)
+    include_domains = body.get("includeDomains") or []
+    exclude_domains = body.get("excludeDomains") or []
+    search_query = compile_search_query(q, include_domains, exclude_domains)
+
+    # 2. Request 2× buffer to account for filtering / dedup loss
+    fetch_limit = min(limit * 2, config.max_search_results * 2)
+
     results = searxng_search(
-        q,
-        limit=limit,
+        search_query,
+        limit=fetch_limit,
         categories=categories,
         language=language,
     )
 
-    # Post-filter by includeDomains / excludeDomains
-    include_domains = body.get("includeDomains") or []
-    exclude_domains = body.get("excludeDomains") or []
-    if include_domains or exclude_domains:
-        from urllib.parse import urlparse
+    # 3. SearXNG 返回空 → DuckDuckGo 兜底
+    if not results:
+        _log.info("SearXNG returned 0 results, falling back to DuckDuckGo")
+        ddg_results = ddg_search(q, limit=fetch_limit)
+        if ddg_results:
+            results = ddg_results
 
-        filtered: list[dict] = []
-        for r in results:
-            host = urlparse(r["url"]).netloc
-            if include_domains and host not in include_domains:
-                continue
-            if host in exclude_domains:
-                continue
-            filtered.append(r)
-        results = filtered[:limit]
+    # 4. Slice to exact limit
+    results = results[:limit]
 
     return {
         "success": True,

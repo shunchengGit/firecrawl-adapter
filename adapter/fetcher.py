@@ -10,7 +10,7 @@ import subprocess
 import urllib.parse
 import urllib.request
 import uuid
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,6 +23,80 @@ _log = logging.getLogger("adapter")
 _ANTI_BOT_KEYWORDS = ("_waf_", "captcha", "验证码", "请求存在异常", "限制本次访问")
 
 _SEARXNG_PAGE_SIZE = 20  # SearXNG default results per page
+
+_DDG_LITE = "https://lite.duckduckgo.com/lite/"
+
+
+def compile_search_query(
+    base_query: str,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
+) -> str:
+    """Build a query string with site: / -site: operators baked in.
+
+    Inspired by firecrawl's search-query-builder.ts — puts domain filters
+    directly into the search query so the upstream engine filters natively,
+    avoiding post-filter result loss.
+    """
+    parts = [base_query]
+
+    if include_domains:
+        sites = " OR ".join(f"site:{d}" for d in include_domains)
+        parts.append(f"({sites})")
+
+    if exclude_domains:
+        parts.extend(f"-site:{d}" for d in exclude_domains)
+
+    return " ".join(parts)
+
+
+def ddg_search(query: str, limit: int = 10) -> list[dict]:
+    """Search DuckDuckGo (Lite) as a fallback when SearXNG returns empty.
+
+    Uses the text-only lite.duckduckgo.com — no JS required.
+    Returns empty list on any error (graceful degradation).
+    """
+    if limit <= 0:
+        return []
+
+    results: list[dict] = []
+    try:
+        params = urllib.parse.urlencode({"q": query})
+        req = urllib.request.Request(
+            f"{_DDG_LITE}?{params}",
+            headers={"User-Agent": config.user_agent},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html = r.read()
+
+        soup = BeautifulSoup(html, "html.parser")
+        # DDG Lite structure: table with tr rows, each has a link + snippet
+        for row in soup.select("tr[class]")[:limit]:
+            link = row.select_one("a[class='result-link']")
+            snippet = row.select_one("td[class='result-snippet']")
+            if link and link.get("href"):
+                url_raw: str = link["href"]  # type: ignore[assignment]
+                # DDG Lite wraps URLs in a redirect; extract the real URL from ///
+                parsed = urlparse(url_raw)
+                real_url = parsed.path.lstrip("/") if parsed.path.startswith("/l") else url_raw
+                if "uddg=" in url_raw:
+                    from urllib.parse import parse_qs
+                    try:
+                        real_url = parse_qs(parsed.query).get("uddg", [url_raw])[0]
+                    except Exception:
+                        real_url = url_raw
+
+                results.append({
+                    "title": link.get_text(strip=True) or query,
+                    "url": real_url,
+                    "content": snippet.get_text(separator=" ", strip=True) if snippet else "",
+                })
+
+        _log.info("DDG returned %d results for %r", len(results), query[:60])
+    except Exception as e:
+        _log.warning("DDG search failed (%s), returning empty", e)
+
+    return results[:limit]
 
 
 def find_agent_browser() -> str | None:
