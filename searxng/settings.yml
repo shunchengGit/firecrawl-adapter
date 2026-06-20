@@ -27,32 +27,32 @@ ui:
   default_theme: simple
   default_locale: ""
 
-# 只保留可靠引擎，显式禁用默认开启的其他引擎
+# 只保留国内可直连的引擎，被墙引擎必须禁用（超时会拖垮整个搜索）
 # weight 越大越优先（结果排前面），国内引擎权重更高
 engines:
   # 国内引擎（优先）
   - name: baidu
+    disabled: false
     timeout: 15.0
     weight: 2
   - name: sogou
+    disabled: false
     timeout: 15.0
     weight: 2
 
-  # 国际引擎
+  # 国际引擎（国内可直连）
   - name: bing
-    timeout: 20.0
-    weight: 1
-  - name: google
-    timeout: 20.0
-    weight: 1
-  - name: duckduckgo
+    disabled: false
     timeout: 15.0
     weight: 1
-  - name: wikipedia
-    timeout: 10.0
-    weight: 1
 
-  # 禁用默认开启但我们不需要的引擎（避免超时风暴）
+  # 以下引擎国内被墙/不稳定，必须禁用
+  - name: google
+    disabled: true
+  - name: duckduckgo
+    disabled: true
+  - name: wikipedia
+    disabled: true
   - name: brave
     disabled: true
   - name: startpage
@@ -75,5 +75,5 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 6
+  pool_maxsize: 3
   enable_http2: false
