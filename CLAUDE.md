@@ -8,6 +8,7 @@ Firecrawl API 的本地免费替代品。外部 agent（Hermes）把 `FIRECRAWL_
 
 ```
 Hermes / Claude Code (MCP) → adapter (端口 3672) → SearXNG (端口 3671) → Google/Bing/Baidu/...
+                                                    ↘ SearXNG 空时 → DuckDuckGo Lite (兜底)
 ```
 
 ## 常用命令
@@ -52,6 +53,9 @@ claude mcp get firecrawl-local  # 详情
 | `ADAPTER_PORT` | `3672` | adapter 监听端口 |
 | `SEARXNG_BASE` | `http://127.0.0.1:3671` | adapter 指向 SearXNG 的地址 |
 | `FIRECRAWL_API_URL` | `http://127.0.0.1:3672` | Hermes / MCP 指向 adapter 的地址 |
+| `ADAPTER_MAX_SEARCH_RESULTS` | `20` | 单次搜索最大返回条数（>20 触发分页） |
+| `SEARXNG_ENGINES` | `""` | 覆盖 SearXNG 搜索引擎（逗号分隔） |
+| `SEARXNG_CATEGORIES` | `"general"` | 默认搜索分类 |
 
 ## 架构
 
@@ -59,7 +63,7 @@ claude mcp get firecrawl-local  # 详情
 
 - **`server.py`** — `ThreadingHTTPServer` + `BaseHTTPRequestHandler` 子类。只做路由 + JSON 读写 + 错误包装。每个端点都委托给 `handlers.*` 的函数。这是唯一接触 socket 的地方。
 - **`handlers.py`** — 每个端点一个函数（`handle_search`、`handle_scrape`、`handle_start_crawl`、`handle_crawl_status`、`handle_cancel_crawl`、`handle_extract`、`handle_map`）。每个接收解析后的 `body` dict，返回响应 dict。不感知 HTTP——这正是它们可单元测试的原因。
-- **`fetcher.py`** — 所有网络 I/O。`scrape_url()` 先用 `requests.get`；如果页面看起来被反爬挡住（启发式：可见文本 <500 字符，或含 WAF 关键词），回退到 `scrape_url_headless()`，它会 shell out 调 `agent-browser`。另有 `searxng_search()`（支持多页分页、引擎/分类/语言过滤）和 `map_url()`。
+- **`fetcher.py`** — 所有网络 I/O。`scrape_url()` 先用 `requests.get`；如果页面看起来被反爬挡住（启发式：可见文本 <500 字符，或含 WAF 关键词），回退到 `scrape_url_headless()`，它会 shell out 调 `agent-browser`。另有 `searxng_search()`（多页分页 + 引擎/分类/语言过滤）、`ddg_search()`（DuckDuckGo Lite 兜底）、`compile_search_query()`（query 编译，domain → site: / -site: 操作符）和 `map_url()`。
 - **`jobs.py`** — 内存中的爬取任务存储（`_jobs` dict + 锁）。`crawl_worker()` 在 daemon 线程里运行，按 BFS 遍历同域链接，最多到 `max_depth`。`cleanup_old_jobs()` 强制 TTL + 最大数量限制——每次新建任务时调用，防止内存无限增长。
 - **`parser.py`** — 纯 HTML 辅助函数：`extract_main()`、`get_meta()`、`match_path()`、`html_to_markdown()`。线程局部的 `HTML2Text` 实例（该库非线程安全）。
 - **`config.py`** — 冻结的 `Config` dataclass，所有值来自环境变量带默认值。全局唯一的 `config` 实例被各处 import。
@@ -78,11 +82,21 @@ claude mcp get firecrawl-local  # 详情
 - **Docker 镜像里没有 agent-browser** — Dockerfile 只有 Python。headless 兜底只在本地运行模式下可用。不要尝试往镜像里加 agent-browser；构建时 Chromium 安装 + Chrome-for-Testing 下载会因网络限制失败。
 - **`_is_likely_blocked` 阈值（500 字符）** 会对合法的短页面误判（如 `example.com`）。这是为了抓 Cloudflare 挑战页有意为之，但内容极少的页面会有误报。
 - **SearXNG 配置以只读方式挂载** 通过 `docker-compose.yml` —— 本地编辑 `searxng/settings.yml`，重启容器生效。
-- **SearXNG 搜索支持分页** — `searxng_search()` 当 `limit > 20`（SearXNG 每页默认 20 条）时自动循环获取多页。支持 `engines`、`categories`、`language` 参数覆盖默认值。`handle_search` 接受 Firecrawl 的 `sources: [{type: "web"|"news"|"images"}]` 并映射到 SearXNG 分类，支持 `includeDomains`/`excludeDomains` 后置过滤，响应含 `searchId`（uuid4 hex）供后续反馈。
+- **SearXNG 引擎选择** — 默认加载 243 个引擎会导致超时风暴（`ResultContainer` 过早关闭，正常结果也被丢弃）。当前只启用 6 个：baidu/sogou（weight=2 优先）+ bing/google/duckduckgo/wikipedia（weight=1）。被墙引擎通过代理后可启用（见下）。
+- **SearXNG 代理** — 通过 `outgoing.proxies` 配置全局代理。容器内必须用 `host.docker.internal`（`127.0.0.1` 指向容器自身）。当前代理 `host.docker.internal:7890`（macOS 系统代理端口）。
+- **搜索三层增强**（借鉴 [firecrawl](https://github.com/mendable/firecrawl) 的 `search-query-builder.ts` + `search/v2/index.ts`）：
+  1. **Query 编译** — `compile_search_query()` 把 `includeDomains`/`excludeDomains` 编译为 `site:` / `-site:` 操作符注入 query，上游引擎原生过滤
+  2. **Limit×2 缓冲** — `fetch_limit = min(limit×2, max_search_results×2)`，多取一倍防过滤/去重损失
+  3. **DDG 兜底** — SearXNG 返回空时自动切 DuckDuckGo Lite（纯 HTML 解析，无额外依赖）
+- **SearXNG 搜索分页** — `searxng_search()` 当 `limit > 20`（SearXNG 每页默认 20 条）时自动循环获取多页。代理启用后 page 2/3 有真实数据（6 引擎 vs 之前 3 引擎只有 1 页）。支持 `engines`、`categories`、`language` 参数。`handle_search` 接受 `sources: [{type: "web"|"news"|"images"}]` 映射到 SearXNG 分类，响应含 `searchId`（uuid4 hex）供后续反馈。
 
 ## SearXNG
 
-在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml`（引擎：Google、Bing、DuckDuckGo、Wikipedia、Wikidata、百度、搜狗）。`secret_key` 硬编码为 `"hermes-searxng-local"` —— 仅本地用可以，但不要对外暴露。主机端口由 `SEARXNG_PORT` 控制（默认 3671）→ 容器内 8080。
+在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml`。
+
+**引擎（6 个）**：baidu(weight=2) sogou(weight=2) bing google duckduckgo wikipedia。百度/搜狗优先（weight 越大越优先），google/ddg 通过代理访问（国内直连被墙）。
+
+`secret_key` 硬编码为 `"hermes-searxng-local"` —— 仅本地用可以，但不要对外暴露。主机端口由 `SEARXNG_PORT` 控制（默认 3671）→ 容器内 8080。
 
 ## Claude Code MCP 集成
 

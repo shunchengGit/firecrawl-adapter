@@ -16,7 +16,7 @@ Firecrawl 适配器 (adapter/)   端口 3672
   │  实现 /v2/search, /v2/scrape, /v2/crawl 等 Firecrawl 协议
   ▼
 SearXNG 元搜索引擎 (Docker)   端口 3671
-  │  聚合多个搜索引擎
+  │  聚合多个搜索引擎；空时回退 DuckDuckGo Lite
   ▼
 ┌──────────┬────────┬──────┬───────────┐
 │  Google  │  Bing  │ Baidu│ DuckDuckGo│  ...
@@ -74,23 +74,33 @@ docker compose up -d --build
 ### 验证
 
 ```bash
+# 基本搜索
 curl -X POST http://127.0.0.1:3672/v2/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "test", "limit": 2}'
-```
+  -d '{"query": "Python", "limit": 5}'
 
-返回 JSON 搜索结果即表示正常。
+# 中文搜索 + 域名过滤
+curl -X POST http://127.0.0.1:3672/v2/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Python 教程","limit":10,"language":"zh-CN","includeDomains":["runoob.com"]}'
+
+# 分页（需 ADAPTER_MAX_SEARCH_RESULTS > 20）
+curl -X POST http://127.0.0.1:3672/v2/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"programming","limit":50}'
+```
 
 ## 适配器 API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/healthz` | 健康检查 |
-| POST | `/v2/search` | 网页搜索 |
-| POST | `/v2/scrape` | 抓取单页内容（支持 agent-browser headless 兜底） |
-| POST | `/v2/crawl` | 爬取网站（异步，返回 job ID） |
-| GET | `/v2/crawl/:id` | 查询爬取状态及结果（支持 `?page=N` 分页） |
+| GET | `/healthz` | 健康检查（含 SearXNG 存活探测） |
+| POST | `/v2/search` | 网页搜索（多页分页 + query 编译 + DDG 兜底） |
+| POST | `/v2/scrape` | 抓取单页内容（requests → agent-browser 兜底） |
+| POST | `/v2/crawl` | 爬取网站（异步 BFS，返回 job ID） |
+| GET | `/v2/crawl/:id` | 查询爬取状态及结果（`?page=N` 分页） |
 | DELETE | `/v2/crawl/:id` | 取消爬取任务 |
+| POST | `/v2/extract` | 批量抓取（最多 5 个 URL，无 AI 提取） |
 | POST | `/v2/map` | 获取站点链接列表 |
 
 ## 配置（环境变量）
@@ -100,9 +110,14 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 | `SEARXNG_BASE` | `http://127.0.0.1:3671` | SearXNG 地址 |
 | `ADAPTER_HOST` | `127.0.0.1` | 适配器监听地址 |
 | `ADAPTER_PORT` | `3672` | 适配器监听端口 |
+| `ADAPTER_MAX_SEARCH_RESULTS` | `20` | 单次搜索最大条数（>20 触发分页） |
+| `ADAPTER_MAX_SCRAPE` | `60000` | 单页抓取最大字符数 |
+| `ADAPTER_CRAWL_TIMEOUT` | `300` | 单次爬取超时（秒） |
 | `ADAPTER_MAX_JOBS` | `100` | 最大保留任务数 |
 | `ADAPTER_JOB_TTL` | `3600` | 任务保留时长（秒） |
 | `ADAPTER_MAX_BODY_BYTES` | `2097152` | 请求体最大字节数 |
+| `SEARXNG_ENGINES` | `""` | 覆盖默认搜索引擎（逗号分隔） |
+| `SEARXNG_CATEGORIES` | `"general"` | 默认搜索分类 |
 
 ## 开发
 
@@ -130,12 +145,18 @@ Python 包（见 `pyproject.toml`）：
 
 ## 搜索引擎
 
-当前配置（`searxng/settings.yml`）启用了以下引擎：
+当前配置（`searxng/settings.yml`）启用了 **6 个引擎**，按权重排序：
 
-- Google
-- Bing
-- DuckDuckGo
-- Wikipedia
-- Wikidata
-- 百度
-- 搜狗
+| 引擎 | Weight | 说明 |
+|------|--------|------|
+| 百度 | 2 | 国内优先 |
+| 搜狗 | 2 | 国内优先 |
+| Bing | 1 | 国际，国内直连 |
+| Google | 1 | 走代理，被墙 |
+| DuckDuckGo | 1 | 走代理，被墙 |
+| Wikipedia | 1 | 走代理，不稳定 |
+
+- 代理配置：`outgoing.proxies: { http/https: "http://host.docker.internal:7890" }`
+- 无代理时需禁用 Google/DDG/Wikipedia（`disabled: true`），否则超时拖垮所有结果
+- 分页：6 引擎下 SearXNG 每页约 18-20 条，page 2/3 有真实数据，`ADAPTER_MAX_SEARCH_RESULTS` 设大即可触发
+- 兜底：SearXNG 返回空时自动切 DuckDuckGo Lite（纯 HTML 解析，无额外依赖）
