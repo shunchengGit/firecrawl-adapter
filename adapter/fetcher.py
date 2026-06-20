@@ -10,7 +10,7 @@ import subprocess
 import urllib.parse
 import urllib.request
 import uuid
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,8 +23,6 @@ _log = logging.getLogger("adapter")
 _ANTI_BOT_KEYWORDS = ("_waf_", "captcha", "验证码", "请求存在异常", "限制本次访问")
 
 _SEARXNG_PAGE_SIZE = 20  # SearXNG default results per page
-
-_DDG_LITE = "https://lite.duckduckgo.com/lite/"
 
 
 def compile_search_query(
@@ -48,70 +46,6 @@ def compile_search_query(
         parts.extend(f"-site:{d}" for d in exclude_domains)
 
     return " ".join(parts)
-
-
-def ddg_search(query: str, limit: int = 10) -> list[dict]:
-    """Search DuckDuckGo (Lite) as a fallback when SearXNG returns empty.
-
-    Uses the text-only lite.duckduckgo.com — no JS required.
-    Returns empty list on any error (graceful degradation).
-    """
-    if limit <= 0:
-        return []
-
-    results: list[dict] = []
-    try:
-        params = urllib.parse.urlencode({"q": query})
-        req = urllib.request.Request(
-            f"{_DDG_LITE}?{params}",
-            headers={"User-Agent": config.user_agent},
-        )
-        with urllib.request.urlopen(req, timeout=10) as r:
-            html = r.read()
-
-        soup = BeautifulSoup(html, "html.parser")
-        # DDG Lite structure: each result spans 4 <tr> rows:
-        #   tr[0]: number + a.result-link (title)
-        #   tr[1]: .result-snippet (snippet) — NEXT sibling, not in same row!
-        #   tr[2]: URL text
-        #   tr[3]: empty spacer
-        rows = [tr for tr in soup.select("tr") if tr.select_one("a.result-link")]
-        for row in rows[:limit]:
-            link = row.select_one("a.result-link")
-            if not link or not link.get("href"):
-                continue
-
-            url_raw: str = link["href"]  # type: ignore[assignment]
-            # DDG Lite wraps URLs in a redirect; extract the real URL via uddg param
-            parsed = urlparse(url_raw)
-            if "uddg=" in url_raw:
-                from urllib.parse import parse_qs
-                try:
-                    real_url = parse_qs(parsed.query).get("uddg", [url_raw])[0]
-                except Exception:
-                    real_url = url_raw
-            else:
-                real_url = url_raw
-
-            # Snippet is in the next <tr> sibling, not inside the link row
-            snippet_text = ""
-            next_row = row.find_next_sibling("tr")
-            if next_row and hasattr(next_row, "select_one"):
-                snip_td = next_row.select_one(".result-snippet")
-                if snip_td:
-                    snippet_text = snip_td.get_text(separator=" ", strip=True)
-
-            results.append({
-                "title": link.get_text(strip=True) or query,
-                "url": real_url,
-                "content": snippet_text,
-            })
-
-        _log.info("DDG returned %d results for %r", len(results), query[:60])
-    except Exception as e:
-        _log.warning("DDG search failed (%s), returning empty", e)
-
-    return results[:limit]
 
 
 def find_agent_browser() -> str | None:

@@ -37,8 +37,7 @@ def test_search_with_language():
 
 def test_search_limit_capped():
     """fetch_limit is capped to 2× max_search_results (buffer ceiling)."""
-    with patch("adapter.handlers.searxng_search") as mock_search, \
-         patch("adapter.handlers.ddg_search", return_value=[]):
+    with patch("adapter.handlers.searxng_search") as mock_search:
         mock_search.return_value = []
         handlers.handle_search({"query": "test", "limit": 9999})
         from adapter.config import config
@@ -77,8 +76,7 @@ def test_search_no_sources_uses_default():
 
 def test_search_query_compile_domains():
     """Domain filters are compiled into the query via compile_search_query."""
-    with patch("adapter.handlers.searxng_search") as mock_search, \
-         patch("adapter.handlers.ddg_search", return_value=[]):
+    with patch("adapter.handlers.searxng_search") as mock_search:
         mock_search.return_value = ["r1", "r2"]
         handlers.handle_search({
             "query": "Python",
@@ -94,36 +92,13 @@ def test_search_query_compile_domains():
 
 def test_search_buffer_limit():
     """SearXNG is queried with 2× limit as buffer."""
-    with patch("adapter.handlers.searxng_search") as mock_search, \
-         patch("adapter.handlers.ddg_search", return_value=[]):
+    with patch("adapter.handlers.searxng_search") as mock_search:
         mock_search.return_value = ["a"] * 5
         handlers.handle_search({"query": "test", "limit": 5})
         # fetch_limit = min(5*2, max_search_results*2)
         fetch_limit = mock_search.call_args[1]["limit"]
         assert fetch_limit >= 5  # at least requested
         assert fetch_limit <= 5 * 2  # at most 2×
-
-
-def test_search_ddg_fallback():
-    """DuckDuckGo fallback when SearXNG returns empty."""
-    with patch("adapter.handlers.searxng_search", return_value=[]), \
-         patch("adapter.handlers.ddg_search") as mock_ddg:
-        mock_ddg.return_value = [
-            {"title": "DDG result", "url": "https://example.com", "content": "..."}
-        ]
-        handlers.handle_search({"query": "rare query", "limit": 3})
-        mock_ddg.assert_called_once()
-
-
-def test_search_no_ddg_when_searxng_has_results():
-    """DDG is NOT called when SearXNG returns results."""
-    with patch("adapter.handlers.searxng_search") as mock_searx, \
-         patch("adapter.handlers.ddg_search") as mock_ddg:
-        mock_searx.return_value = [
-            {"title": "OK", "url": "https://a.com", "content": "x"}
-        ]
-        handlers.handle_search({"query": "test", "limit": 3})
-        mock_ddg.assert_not_called()
 
 
 def test_compile_search_query():
