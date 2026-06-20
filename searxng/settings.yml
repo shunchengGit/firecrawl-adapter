@@ -18,7 +18,7 @@ server:
   secret_key: "hermes-searxng-local"
   bind_address: "0.0.0.0"
   port: 8080
-  limiter: true
+  limiter: false
   image_proxy: false
   method: "GET"
 
@@ -27,27 +27,46 @@ ui:
   default_theme: simple
   default_locale: ""
 
+# 只保留可靠引擎，显式禁用默认开启的其他引擎
 engines:
-  # 中文搜索引擎
-  - name: bing
-    disabled: false
-  - name: duckduckgo
-    disabled: false
+  # 国际引擎
   - name: google
-    disabled: false
+    timeout: 20.0
+  - name: duckduckgo
+    timeout: 15.0
   - name: wikipedia
-    disabled: false
-  - name: wikidata
-    disabled: false
+    timeout: 10.0
+  - name: bing
+    timeout: 20.0
+
+  # 国内引擎
   - name: baidu
-    disabled: false
+    timeout: 15.0
   - name: sogou
-    disabled: false
+    timeout: 15.0
+
+  # 禁用默认开启但我们不需要的引擎（避免超时风暴）
+  - name: brave
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: qwant
+    disabled: true
+  - name: yandex
+    disabled: true
+  - name: presearch
+    disabled: true
+  - name: wikidata
+    disabled: true
+  - name: yahoo
+    disabled: true
+  - name: mojeek
+    disabled: true
 
 outgoing:
-  request_timeout: 10.0
-  max_request_timeout: 15.0
+  request_timeout: 20.0
+  max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 10
-  enable_http2: true
+  pool_maxsize: 6
+  enable_http2: false
