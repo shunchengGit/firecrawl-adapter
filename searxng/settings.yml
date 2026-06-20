@@ -55,8 +55,7 @@ engines:
     disabled: false
     timeout: 15.0
   - name: mojeek
-    disabled: false
-    timeout: 15.0
+    disabled: true
 
   # 持续 CAPTCHA/被墙/不可用
   - name: baidu
@@ -85,7 +84,7 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 7
+  pool_maxsize: 6
   enable_http2: false
   # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
   proxies:
