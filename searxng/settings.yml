@@ -27,8 +27,8 @@ ui:
   default_theme: simple
   default_locale: ""
 
-# 只保留国内可直连的引擎，被墙引擎必须禁用（超时会拖垮整个搜索）
-# weight 越大越优先（结果排前面），国内引擎权重更高
+# 引擎选择：国内直连优先 + 国际走代理，禁用被墙/不可用的
+# weight 越大越优先（结果排前面）
 engines:
   # 国内引擎（优先）
   - name: baidu
@@ -62,22 +62,36 @@ engines:
     timeout: 10.0
     weight: 1
 
-  # 禁用不需要的引擎（避免超时风暴）
+  # 直连可用引擎（无需代理也能跑，备选）
+  - name: yandex
+    disabled: false
+    timeout: 15.0
+    weight: 1
+  - name: presearch
+    disabled: false
+    timeout: 15.0
+    weight: 1
+  - name: mojeek
+    disabled: false
+    timeout: 15.0
+    weight: 1
+
+  # 禁用：被墙 / HTTP错误 / 无结果 / 太慢
   - name: brave
     disabled: true
   - name: startpage
     disabled: true
   - name: qwant
     disabled: true
-  - name: yandex
-    disabled: true
-  - name: presearch
-    disabled: true
   - name: wikidata
     disabled: true
   - name: yahoo
     disabled: true
-  - name: mojeek
+  - name: aol
+    disabled: true
+  - name: seznam
+    disabled: true
+  - name: naver
     disabled: true
 
 outgoing:
@@ -85,7 +99,7 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 7
+  pool_maxsize: 10
   enable_http2: false
   # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
   proxies:
