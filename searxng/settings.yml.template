@@ -88,5 +88,5 @@ outgoing:
   enable_http2: false
   # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
   proxies:
-    http: "http://host.docker.internal:7890"
-    https: "http://host.docker.internal:7890"
+    http: "__SEARXNG_PROXY__"
+    https: "__SEARXNG_PROXY__"

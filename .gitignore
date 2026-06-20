@@ -50,3 +50,4 @@ docker-compose.override.yml
 
 # Crawl job scratch
 /tmp/
+searxng/settings.yml

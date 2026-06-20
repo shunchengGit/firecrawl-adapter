@@ -26,6 +26,29 @@ if ! "$ADAPTER_PYTHON" -c "import requests" 2>/dev/null; then
 fi
 echo "    ✓ Python ($("$ADAPTER_PYTHON" --version 2>&1))"
 
+# --- 从 .env 模板生成 SearXNG 配置 ---
+_TEMPLATE="searxng/settings.yml.template"
+_TARGET="searxng/settings.yml"
+if [ -f "$_TEMPLATE" ]; then
+  _proxy="${SEARXNG_PROXY:-}"
+  python3 -c "
+import sys
+proxy = '${_proxy}'
+template = '${_TEMPLATE}'
+target = '${_TARGET}'
+with open(template) as f:
+    content = f.read()
+content = content.replace('__SEARXNG_PROXY__', proxy)
+with open(target, 'w') as f:
+    f.write(content)
+"
+  if [ -n "$_proxy" ]; then
+    echo "    SearXNG 代理: ${_proxy}"
+  else
+    echo "    SearXNG 代理: (无)"
+  fi
+fi
+
 # --- 启动 ---
 echo
 echo "==> 启动 SearXNG + Redis (Docker)"
