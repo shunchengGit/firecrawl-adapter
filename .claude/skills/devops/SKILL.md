@@ -24,7 +24,7 @@ cli_version: ">=1.0.0"
 |------|------|
 | `start.sh` | 启动 SearXNG (Docker) + adapter（自愈） |
 | `stop.sh` | 停止 adapter + SearXNG（不动 agent-browser） |
-| `restart.sh` | 重启 adapter（SearXNG 不动） |
+| `reload.sh` | 重载 adapter 代码（SearXNG 不动） |
 | `status.sh` | SearXNG / adapter / agent-browser 状态 |
 | `logs.sh [adapter\|searxng\|redis]` | 查看日志 |
 
@@ -56,6 +56,7 @@ cli_version: ">=1.0.0"
 | `ADAPTER_PORT` | `3672` | adapter 监听端口 |
 | `SEARXNG_BASE` | `http://127.0.0.1:3671` | adapter 指向 SearXNG |
 | `FIRECRAWL_API_URL` | `http://127.0.0.1:3672` | Hermes / MCP 指向 adapter |
+| `SEARXNG_PROXY` | `http://host.docker.internal:7890` | SearXNG 全局代理（留空=无代理） |
 
 ## Python 选择策略
 
