@@ -42,8 +42,7 @@ engines:
     disabled: false
     timeout: 20.0
   - name: duckduckgo
-    disabled: false
-    timeout: 15.0
+    disabled: true
   - name: wikipedia
     disabled: false
     timeout: 10.0
@@ -86,7 +85,7 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 8
+  pool_maxsize: 7
   enable_http2: false
   # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
   proxies:
