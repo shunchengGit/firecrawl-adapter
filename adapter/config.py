@@ -3,6 +3,16 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    # Load .env from project root (two levels up from this file)
+    _env_path = Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    pass
 
 
 @dataclass(frozen=True)
@@ -17,6 +27,7 @@ class Config:
     job_ttl_seconds: int
     max_body_bytes: int
     max_search_results: int
+    crawl_timeout: int
 
     @classmethod
     def from_env(cls) -> Config:
@@ -31,6 +42,7 @@ class Config:
             job_ttl_seconds=int(os.getenv("ADAPTER_JOB_TTL", "3600")),
             max_body_bytes=int(os.getenv("ADAPTER_MAX_BODY_BYTES", str(2 * 1024 * 1024))),
             max_search_results=int(os.getenv("ADAPTER_MAX_SEARCH_RESULTS", "20")),
+            crawl_timeout=int(os.getenv("ADAPTER_CRAWL_TIMEOUT", "300")),
         )
 
 

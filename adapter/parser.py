@@ -49,7 +49,7 @@ def get_meta(soup: BeautifulSoup, name: str) -> str:
     tag = soup.find("meta", attrs={"name": name}) or soup.find(
         "meta", attrs={"property": f"og:{name}"}
     )
-    if tag and tag.get("content"):
+    if isinstance(tag, Tag) and tag.get("content"):
         return str(tag["content"]).strip()
     return ""
 

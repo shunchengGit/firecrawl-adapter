@@ -1,14 +1,21 @@
 """HTTP server and request routing."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
+import shutil
+import signal
+import subprocess
+import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import handlers
 from .config import config
+from .fetcher import check_searxng
+from .jobs import mark_all_running_cancelled
 
 logging.basicConfig(level=logging.WARNING, format="[adapter] %(message)s")
 _log = logging.getLogger("adapter")
@@ -65,7 +72,11 @@ class Adapter(BaseHTTPRequestHandler):
         path = self.path.rstrip("/")
         try:
             if path in ("/healthz", "/health"):
-                self._json(200, {"status": "ok"})
+                searxng_up = check_searxng()
+                self._json(200, {
+                    "status": "ok" if searxng_up else "degraded",
+                    "searxng": "up" if searxng_up else "down",
+                })
                 return
             m = _CRAWL_RE.match(path)
             if m:
@@ -105,4 +116,24 @@ def main() -> None:
     print("  GET  /healthz")
     server = ThreadingHTTPServer((config.listen_host, config.listen_port), Adapter)
     server.daemon_threads = True
+
+    def _shutdown(signum, frame):
+        _log.warning("收到信号 %s，优雅关闭中...", signum)
+        n = mark_all_running_cancelled()
+        if n:
+            _log.warning("已标记 %d 个运行中 crawl 为 cancelled", n)
+        # 关 agent-browser daemon，触发 session cookie 落盘
+        agent_bin = shutil.which("agent-browser")
+        if agent_bin:
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    [agent_bin, "close", "--all"],
+                    capture_output=True,
+                    timeout=10,
+                )
+        # 在新线程里 shutdown，避免与主线程 serve_forever 死锁
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
     server.serve_forever()

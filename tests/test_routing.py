@@ -41,7 +41,12 @@ def base_url():
 def test_health_endpoint(base_url):
     resp = httpx.get(f"{base_url}/healthz", timeout=5)
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert "status" in body
+    assert "searxng" in body
+    # 测试环境 SearXNG 可能没跑，status 为 ok 或 degraded
+    assert body["status"] in ("ok", "degraded")
+    assert body["searxng"] in ("up", "down")
 
 
 def test_health_alias(base_url):

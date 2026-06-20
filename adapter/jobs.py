@@ -67,6 +67,17 @@ def cancel_job(job_id: str) -> bool:
         return False
 
 
+def mark_all_running_cancelled() -> int:
+    """Mark all scraping/running jobs as cancelled. Used on graceful shutdown."""
+    with _jobs_lock:
+        count = 0
+        for j in _jobs.values():
+            if j.get("status") not in ("completed", "cancelled", "timeout"):
+                j["status"] = "cancelled"
+                count += 1
+        return count
+
+
 def crawl_worker(
     job_id: str,
     url: str,
@@ -75,11 +86,22 @@ def crawl_worker(
     include_paths: list[str] | None = None,
     exclude_paths: list[str] | None = None,
 ) -> None:
+    deadline = time.monotonic() + config.crawl_timeout
     seen: set[str] = set()
     queue: deque[tuple[str, int]] = deque([(url, 0)])
     docs: list[dict] = []
+    timed_out = False
 
     while queue and len(docs) < limit:
+        if time.monotonic() > deadline:
+            timed_out = True
+            _log.warning("Crawl %s timed out after %ss", job_id, config.crawl_timeout)
+            break
+        # 检查是否已被取消
+        with _jobs_lock:
+            j = _jobs.get(job_id)
+            if not j or j["status"] == "cancelled":
+                return
         cur, depth = queue.popleft()
         if cur in seen:
             continue
@@ -107,7 +129,7 @@ def crawl_worker(
     with _jobs_lock:
         j = _jobs.get(job_id)
         if j and j["status"] not in ("cancelled",):
-            j["status"] = "completed"
+            j["status"] = "timeout" if timed_out else "completed"
             j["completed"] = len(docs)
             j["total"] = len(docs)
             j["data"] = docs

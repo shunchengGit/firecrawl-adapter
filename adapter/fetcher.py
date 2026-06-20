@@ -90,9 +90,11 @@ def scrape_url_headless(url: str, timeout: int = 30) -> tuple[str, str]:
 
         return final_url, html
     finally:
+        # 每次抓取后 close，确保 cookie 落盘到 session 文件，daemon 状态不漂移。
+        # 代价是下次抓取要冷启动 Chrome（数秒）。
         with contextlib.suppress(Exception):
             subprocess.run(
-                [agent_bin, "close"],
+                [agent_bin, "close", "--all"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -119,6 +121,20 @@ def searxng_search(query: str, limit: int = 5) -> list[dict]:
             }
         )
     return results
+
+
+def check_searxng() -> bool:
+    """Quick liveness probe for SearXNG. Returns True if reachable."""
+    try:
+        req = urllib.request.Request(
+            f"{config.searxng_base}/search?q=test&format=json",
+            headers={"User-Agent": config.user_agent},
+        )
+        with urllib.request.urlopen(req, timeout=3) as r:
+            r.read()
+        return True
+    except Exception:
+        return False
 
 
 def _is_likely_blocked(html_raw: str) -> bool:
