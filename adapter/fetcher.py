@@ -70,27 +70,42 @@ def ddg_search(query: str, limit: int = 10) -> list[dict]:
             html = r.read()
 
         soup = BeautifulSoup(html, "html.parser")
-        # DDG Lite structure: table with tr rows, each has a link + snippet
-        for row in soup.select("tr[class]")[:limit]:
-            link = row.select_one("a[class='result-link']")
-            snippet = row.select_one("td[class='result-snippet']")
-            if link and link.get("href"):
-                url_raw: str = link["href"]  # type: ignore[assignment]
-                # DDG Lite wraps URLs in a redirect; extract the real URL from ///
-                parsed = urlparse(url_raw)
-                real_url = parsed.path.lstrip("/") if parsed.path.startswith("/l") else url_raw
-                if "uddg=" in url_raw:
-                    from urllib.parse import parse_qs
-                    try:
-                        real_url = parse_qs(parsed.query).get("uddg", [url_raw])[0]
-                    except Exception:
-                        real_url = url_raw
+        # DDG Lite structure: each result spans 4 <tr> rows:
+        #   tr[0]: number + a.result-link (title)
+        #   tr[1]: .result-snippet (snippet) — NEXT sibling, not in same row!
+        #   tr[2]: URL text
+        #   tr[3]: empty spacer
+        rows = [tr for tr in soup.select("tr") if tr.select_one("a.result-link")]
+        for row in rows[:limit]:
+            link = row.select_one("a.result-link")
+            if not link or not link.get("href"):
+                continue
 
-                results.append({
-                    "title": link.get_text(strip=True) or query,
-                    "url": real_url,
-                    "content": snippet.get_text(separator=" ", strip=True) if snippet else "",
-                })
+            url_raw: str = link["href"]  # type: ignore[assignment]
+            # DDG Lite wraps URLs in a redirect; extract the real URL via uddg param
+            parsed = urlparse(url_raw)
+            if "uddg=" in url_raw:
+                from urllib.parse import parse_qs
+                try:
+                    real_url = parse_qs(parsed.query).get("uddg", [url_raw])[0]
+                except Exception:
+                    real_url = url_raw
+            else:
+                real_url = url_raw
+
+            # Snippet is in the next <tr> sibling, not inside the link row
+            snippet_text = ""
+            next_row = row.find_next_sibling("tr")
+            if next_row and hasattr(next_row, "select_one"):
+                snip_td = next_row.select_one(".result-snippet")
+                if snip_td:
+                    snippet_text = snip_td.get_text(separator=" ", strip=True)
+
+            results.append({
+                "title": link.get_text(strip=True) or query,
+                "url": real_url,
+                "content": snippet_text,
+            })
 
         _log.info("DDG returned %d results for %r", len(results), query[:60])
     except Exception as e:
