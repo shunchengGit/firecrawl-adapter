@@ -40,19 +40,25 @@ engines:
     timeout: 15.0
     weight: 2
 
-  # 国际引擎（国内可直连）
+  # 国际引擎（走代理，可直连）
   - name: bing
     disabled: false
     timeout: 15.0
     weight: 1
-
-  # 以下引擎国内被墙/不稳定，必须禁用
   - name: google
-    disabled: true
+    disabled: false
+    timeout: 20.0
+    weight: 1
   - name: duckduckgo
-    disabled: true
+    disabled: false
+    timeout: 15.0
+    weight: 1
   - name: wikipedia
-    disabled: true
+    disabled: false
+    timeout: 10.0
+    weight: 1
+
+  # 禁用不需要的引擎（避免超时风暴）
   - name: brave
     disabled: true
   - name: startpage
@@ -75,5 +81,9 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 3
+  pool_maxsize: 6
   enable_http2: false
+  # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
+  proxies:
+    http: "http://host.docker.internal:7890"
+    https: "http://host.docker.internal:7890"
