@@ -3,6 +3,9 @@
 set -e
 . "$(dirname "$0")/_env.sh"
 
+# --- 先停旧服务 ---
+"$(dirname "$0")/stop.sh"
+
 # --- 前置检查 ---
 echo "==> 检查环境"
 
@@ -64,23 +67,19 @@ for i in $(seq 1 15); do
 done
 
 echo "==> 启动 adapter (port ${ADAPTER_PORT})"
-if curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" -o /dev/null 2>&1; then
-  echo "    adapter 已在运行"
-else
-  nohup "$ADAPTER_PYTHON" -m adapter > /tmp/firecrawl-adapter.log 2>&1 &
-  echo $! > /tmp/firecrawl-adapter.pid
-  for i in $(seq 1 10); do
-    if curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" -o /dev/null 2>&1; then
-      echo "    adapter ready (pid $(cat /tmp/firecrawl-adapter.pid))"
-      break
-    fi
-    if [ "$i" -eq 10 ]; then
-      echo "    ✗ adapter 启动超时，日志: tail /tmp/firecrawl-adapter.log"
-      exit 1
-    fi
-    sleep 1
-  done
-fi
+nohup "$ADAPTER_PYTHON" -m adapter > /tmp/firecrawl-adapter.log 2>&1 &
+echo $! > /tmp/firecrawl-adapter.pid
+for i in $(seq 1 10); do
+  if curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" -o /dev/null 2>&1; then
+    echo "    adapter ready (pid $(cat /tmp/firecrawl-adapter.pid))"
+    break
+  fi
+  if [ "$i" -eq 10 ]; then
+    echo "    ✗ adapter 启动超时，日志: tail /tmp/firecrawl-adapter.log"
+    exit 1
+  fi
+  sleep 1
+done
 
 echo
 echo "==> 完成"
