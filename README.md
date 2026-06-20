@@ -7,9 +7,11 @@ Firecrawl API 的本地免费替代品。通过 SearXNG 元搜索引擎 + 协议
 ## 架构
 
 ```
-Hermes (web_tools.py)
-  │  FIRECRAWL_API_URL=http://127.0.0.1:3672
-  ▼
+Hermes (web_tools.py)          Claude Code (MCP)
+  │  FIRECRAWL_API_URL=...       │  npx firecrawl-mcp
+  ▼                              ▼
+  └────────────┬─────────────────┘
+               ▼
 Firecrawl 适配器 (adapter/)   端口 3672
   │  实现 /v2/search, /v2/scrape, /v2/crawl 等 Firecrawl 协议
   ▼
