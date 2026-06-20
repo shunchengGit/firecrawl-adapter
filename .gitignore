@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+.python-version
+
+# Type/lint/test caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Local secrets / env
+.env
+.env.local
+*.local
+
+# Docker (local volumes, not the committed compose/config)
+docker-compose.override.yml
+
+# Agent-browser local state (session cookies etc.)
+.agent-browser/
+
+# Crawl job scratch
+/tmp/

@@ -1,0 +1,53 @@
+use_default_settings: true
+
+general:
+  instance_name: "hermes-search"
+  debug: false
+  privacypolicy_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "hermes-searxng-local"
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: true
+  image_proxy: false
+  method: "GET"
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+  default_locale: ""
+
+engines:
+  # 中文搜索引擎
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: google
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: wikidata
+    disabled: false
+  - name: baidu
+    disabled: false
+  - name: sogou
+    disabled: false
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 10
+  enable_http2: true

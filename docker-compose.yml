@@ -1,0 +1,31 @@
+services:
+  redis:
+    image: docker.io/valkey/valkey:8-alpine
+    container_name: searxng-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3671:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:3671/
+      - INSTANCE_NAME=hermes-search
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+    depends_on:
+      - redis
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+volumes:
+  redis_data:
