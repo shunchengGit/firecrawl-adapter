@@ -1,6 +1,8 @@
-# SearXNG + Firecrawl 适配器
+# firecrawl-adapter
 
-本目录提供 Hermes 的**本地免费搜索方案**。通过 SearXNG 元搜索引擎 + Firecrawl API 适配器，使 Hermes 的 `web_search`、`web_extract`、`web_crawl` 工具无需付费 API key 即可工作。
+Firecrawl API 的本地免费替代品。通过 SearXNG 元搜索引擎 + 协议适配器，为 Hermes / Claude Code (MCP) 提供 `web_search`、`web_scrape`、`web_crawl` 等能力，无需付费 API key。
+
+> GitHub: [shunchengGit/firecrawl-adapter](https://github.com/shunchengGit/firecrawl-adapter)
 
 ## 架构
 
@@ -38,11 +40,19 @@ SearXNG 元搜索引擎 (Docker)   端口 3671
 SearXNG 依赖多、配置繁，用 Docker 最省心；adapter 是纯 Python，本地跑最灵活（agent-browser 兜底也能直接用本地的）。
 
 ```bash
+# 一键安装依赖 + 启动服务
+./.claude/skills/devops/scripts/setup.sh
+./.claude/skills/devops/scripts/start.sh
+```
+
+或手动操作：
+
+```bash
 # 1. 启动 SearXNG + Redis
 docker compose up -d
 
 # 2. 安装 Python 依赖（首次）
-pip install requests beautifulsoup4 html2text lxml
+pip install -e ".[dev]"
 
 # 3. 启动 adapter
 python -m adapter
