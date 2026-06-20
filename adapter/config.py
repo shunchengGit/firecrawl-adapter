@@ -28,6 +28,8 @@ class Config:
     max_body_bytes: int
     max_search_results: int
     crawl_timeout: int
+    searxng_engines: str
+    searxng_categories: str
 
     @classmethod
     def from_env(cls) -> Config:
@@ -43,6 +45,8 @@ class Config:
             max_body_bytes=int(os.getenv("ADAPTER_MAX_BODY_BYTES", str(2 * 1024 * 1024))),
             max_search_results=int(os.getenv("ADAPTER_MAX_SEARCH_RESULTS", "20")),
             crawl_timeout=int(os.getenv("ADAPTER_CRAWL_TIMEOUT", "300")),
+            searxng_engines=os.getenv("SEARXNG_ENGINES", ""),
+            searxng_categories=os.getenv("SEARXNG_CATEGORIES", "general"),
         )
 
 

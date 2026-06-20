@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import shutil
 import subprocess
 import urllib.parse
@@ -20,6 +21,8 @@ from .parser import extract_main, get_meta, html_to_markdown
 _log = logging.getLogger("adapter")
 
 _ANTI_BOT_KEYWORDS = ("_waf_", "captcha", "验证码", "请求存在异常", "限制本次访问")
+
+_SEARXNG_PAGE_SIZE = 20  # SearXNG default results per page
 
 
 def find_agent_browser() -> str | None:
@@ -103,26 +106,70 @@ def scrape_url_headless(url: str, timeout: int = 30) -> tuple[str, str]:
             )
 
 
-def searxng_search(query: str, limit: int = 5) -> list[dict]:
-    params = urllib.parse.urlencode(
-        {"q": query, "format": "json", "categories": "general"}
-    )
-    req = urllib.request.Request(
-        f"{config.searxng_base}/search?{params}",
-        headers={"User-Agent": config.user_agent},
-    )
-    with urllib.request.urlopen(req, timeout=15) as r:
-        data = json.loads(r.read())
-    results = []
-    for item in data.get("results", [])[:limit]:
-        results.append(
-            {
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "content": item.get("content", ""),
-            }
+def searxng_search(
+    query: str,
+    limit: int = 5,
+    engines: str | None = None,
+    categories: str | None = None,
+    language: str | None = None,
+) -> list[dict]:
+    """Search via SearXNG with pagination support.
+
+    Fetches multiple pages if *limit* exceeds SearXNG's per-page count (20).
+    Accepts optional engines / categories / language to override defaults.
+    Returns empty list on any error (matches upstream firecrawl behavior).
+    """
+    if limit <= 0:
+        return []
+
+    engines = engines or config.searxng_engines or None
+    categories = categories or config.searxng_categories
+
+    pages_needed = max(1, math.ceil(limit / _SEARXNG_PAGE_SIZE))
+    all_results: list[dict] = []
+
+    for page in range(1, pages_needed + 1):
+        params: dict[str, str] = {
+            "q": query,
+            "format": "json",
+            "pageno": str(page),
+        }
+        if categories:
+            params["categories"] = categories
+        if engines:
+            params["engines"] = engines
+        if language:
+            params["language"] = language
+
+        qs = urllib.parse.urlencode(params)
+        req = urllib.request.Request(
+            f"{config.searxng_base}/search?{qs}",
+            headers={"User-Agent": config.user_agent},
         )
-    return results
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read())
+        except Exception:
+            _log.warning("SearXNG search failed for page %d (query=%r)", page, query[:80])
+            break
+
+        page_results = data.get("results", [])
+        if not page_results:
+            break
+
+        for item in page_results:
+            all_results.append(
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "content": item.get("content", ""),
+                }
+            )
+
+        if len(all_results) >= limit:
+            break
+
+    return all_results[:limit]
 
 
 def check_searxng() -> bool:

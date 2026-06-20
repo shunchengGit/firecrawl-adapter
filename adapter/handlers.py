@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 
 from .config import config
 from .fetcher import map_url, scrape_url, searxng_search
@@ -11,13 +12,62 @@ from .jobs import cancel_job, crawl_worker, create_job, get_job
 
 _log = logging.getLogger("adapter")
 
+# Firecrawl source type → SearXNG category
+_SOURCE_CATEGORY: dict[str, str] = {
+    "web": "general",
+    "news": "news",
+    "images": "images",
+}
+
+
+def _map_sources_to_categories(sources: list | None) -> str:
+    """Map Firecrawl `sources: [{type: "web"}, ...]` to SearXNG categories string."""
+    if not sources:
+        return config.searxng_categories
+    cats: list[str] = []
+    for s in sources:
+        t = s.get("type", "web") if isinstance(s, dict) else str(s)
+        if t in _SOURCE_CATEGORY:
+            cats.append(_SOURCE_CATEGORY[t])
+    return ",".join(cats) if cats else config.searxng_categories
+
 
 def handle_search(body: dict) -> dict:
     q = body.get("query", "")
     if not q:
         return {"success": False, "error": "Missing query"}
     limit = min(body.get("limit", 5), config.max_search_results)
-    return {"success": True, "data": {"web": searxng_search(q, limit)}}
+    language = body.get("lang") or body.get("language")
+    categories = _map_sources_to_categories(body.get("sources"))
+
+    results = searxng_search(
+        q,
+        limit=limit,
+        categories=categories,
+        language=language,
+    )
+
+    # Post-filter by includeDomains / excludeDomains
+    include_domains = body.get("includeDomains") or []
+    exclude_domains = body.get("excludeDomains") or []
+    if include_domains or exclude_domains:
+        from urllib.parse import urlparse
+
+        filtered: list[dict] = []
+        for r in results:
+            host = urlparse(r["url"]).netloc
+            if include_domains and host not in include_domains:
+                continue
+            if host in exclude_domains:
+                continue
+            filtered.append(r)
+        results = filtered[:limit]
+
+    return {
+        "success": True,
+        "data": {"web": results},
+        "searchId": uuid.uuid4().hex,
+    }
 
 
 def handle_scrape(body: dict) -> dict:
