@@ -27,56 +27,43 @@ ui:
   default_theme: simple
   default_locale: ""
 
-# 引擎选择：国内直连优先 + 国际走代理，禁用被墙/不可用的
-# weight 越大越优先（结果排前面）
+# 引擎选择：8个稳定引擎，去掉持续 CAPTCHA 的百度/搜狗
 engines:
-  # 国内引擎（优先）
-  - name: baidu
-    disabled: false
-    timeout: 15.0
-    weight: 2
-  - name: sogou
-    disabled: false
-    timeout: 15.0
-    weight: 2
+  # 国内引擎
   - name: 360search
     disabled: false
     timeout: 15.0
-    weight: 2
 
   # 国际引擎（走代理）
   - name: bing
     disabled: false
     timeout: 15.0
-    weight: 1
   - name: google
     disabled: false
     timeout: 20.0
-    weight: 1
   - name: duckduckgo
     disabled: false
     timeout: 15.0
-    weight: 1
   - name: wikipedia
     disabled: false
     timeout: 10.0
-    weight: 1
 
-  # 直连可用引擎（无需代理也能跑，备选）
+  # 直连可用
   - name: yandex
     disabled: false
     timeout: 15.0
-    weight: 1
   - name: presearch
     disabled: false
     timeout: 15.0
-    weight: 1
   - name: mojeek
     disabled: false
     timeout: 15.0
-    weight: 1
 
-  # 禁用：被墙 / HTTP错误 / 无结果 / 太慢
+  # 持续 CAPTCHA/被墙/不可用
+  - name: baidu
+    disabled: true
+  - name: sogou
+    disabled: true
   - name: brave
     disabled: true
   - name: startpage
@@ -99,7 +86,7 @@ outgoing:
   max_request_timeout: 30.0
   useragent_suffix: ""
   pool_connections: 100
-  pool_maxsize: 10
+  pool_maxsize: 8
   enable_http2: false
   # 全局代理：容器内 → host.docker.internal → 宿主代理 (7890)
   proxies:
