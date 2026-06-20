@@ -10,7 +10,7 @@ import subprocess
 import urllib.parse
 import urllib.request
 import uuid
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,6 +23,8 @@ _log = logging.getLogger("adapter")
 _ANTI_BOT_KEYWORDS = ("_waf_", "captcha", "验证码", "请求存在异常", "限制本次访问")
 
 _SEARXNG_PAGE_SIZE = 20  # SearXNG default results per page
+
+_BING_SEARCH = "https://www.bing.com/search"
 
 
 def compile_search_query(
@@ -46,6 +48,69 @@ def compile_search_query(
         parts.extend(f"-site:{d}" for d in exclude_domains)
 
     return " ".join(parts)
+
+
+def bing_search(query: str, limit: int = 10) -> list[dict]:
+    """Search Bing (HTML scrape) as a fallback when SearXNG returns empty.
+
+    Bing is directly accessible from China, no proxy needed.
+    Returns empty list on any error (graceful degradation).
+    """
+    if limit <= 0:
+        return []
+
+    results: list[dict] = []
+    try:
+        params = urllib.parse.urlencode({"q": query})
+        req = urllib.request.Request(
+            f"{_BING_SEARCH}?{params}",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html = r.read()
+
+        soup = BeautifulSoup(html, "html.parser")
+        for item in soup.select("li.b_algo")[:limit]:
+            link = item.select_one("h2 a")
+            snippet = item.select_one(".b_caption p, .b_caption, p")
+            if not link:
+                continue
+
+            title = link.get_text(strip=True)
+            url: str = link["href"]  # type: ignore[assignment]
+            # Bing wraps results in its own redirect URL
+            if url and not url.startswith("http"):
+                parsed = urlparse(url)
+                if "url=" in url or "r=" in url:
+                    from urllib.parse import parse_qs, unquote
+                    try:
+                        for key in ("url", "r", "u"):
+                            val = parse_qs(parsed.query).get(key)
+                            if val and val[0].startswith("http"):
+                                url = unquote(val[0])
+                                break
+                    except Exception:
+                        url = link["href"]  # type: ignore[assignment]
+                else:
+                    url = urljoin("https://www.bing.com", url)
+
+            results.append({
+                "title": title or query,
+                "url": url,
+                "content": snippet.get_text(separator=" ", strip=True) if snippet else "",
+            })
+
+        _log.info("Bing returned %d results for %r", len(results), query[:60])
+    except Exception as e:
+        _log.warning("Bing search failed (%s), returning empty", e)
+
+    return results[:limit]
 
 
 def find_agent_browser() -> str | None:
