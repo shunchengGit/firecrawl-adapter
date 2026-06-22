@@ -1,88 +1,73 @@
 # firecrawl-adapter
 
-Firecrawl API 的本地免费替代品。通过 SearXNG 元搜索引擎 + 协议适配器，为 Hermes / Claude Code (MCP) 提供 `web_search`、`web_scrape`、`web_crawl` 等能力，无需付费 API key。**必须在 Claude Code 中通过 `devops` 技能操作。**
+Firecrawl API 的本地免费替代。SearXNG 元搜索 + 协议适配，为 Claude Code (MCP) / Hermes 提供 `web_search`、`web_scrape`、`web_crawl`，无需付费 API key。**必须在 Claude Code 中通过 `devops` 技能操作。**
 
 > GitHub: [shunchengGit/firecrawl-adapter](https://github.com/shunchengGit/firecrawl-adapter)
 
 ## 架构
 
 ```
-Hermes / Claude Code (MCP)
+Claude Code (MCP) / Hermes
   │  FIRECRAWL_API_URL=http://127.0.0.1:3672
   ▼
-adapter（端口 3672）— /v2/search, /v2/scrape, /v2/crawl ...
+adapter :3672  实现 Firecrawl /v2/* 协议
   │
   ▼
-SearXNG（Docker，端口 3671）— 聚合 6 引擎，空时 Bing 兜底
+SearXNG :3671 (Docker)  聚合 6 引擎，空时 Bing 兜底
   │
   ▼
 Google / Bing / 360 / Wikipedia / Yandex / Presearch
 ```
 
-## 目录结构
+## 快速开始
 
-| 路径 | 说明 |
-|------|------|
-| `docker-compose.yml` | SearXNG + Valkey(Redis) 容器编排 |
-| `Dockerfile` | 适配器镜像（可选，全 Docker 部署用） |
-| `adapter/` | 适配器 Python 包 |
-| `searxng/settings.yml` | SearXNG 配置（引擎、端口） |
-| `searxng/limiter.toml` | 速率限制 |
-| `tests/` | 单元测试与集成测试 |
-| `pyproject.toml` | 项目元数据、依赖、ruff/mypy 配置 |
+### 1. 安装
 
-## 快速启动
-
-> **必须通过 Claude Code 操作**，在 Claude Code 会话中使用 `devops` 技能管理服务：
-> ```
-> /devops setup    # 首次安装依赖（Docker/Python/venv/agent-browser/.env）
-> /devops start    # 启动 SearXNG + adapter
-> /devops stop     # 停止全部服务
-> /devops reload   # 重载 adapter 代码
-> /devops status   # 查看服务状态
-> /devops logs     # 查看 adapter 日志
-> /devops check    # pytest + ruff + mypy
-> ```
-
-SearXNG 用 Docker 最省心；adapter 本地跑最灵活（agent-browser 兜底可用）。
-
-也可直接调脚本：
-
-```bash
-./.claude/skills/devops/scripts/setup.sh   # 首次安装依赖
-./.claude/skills/devops/scripts/start.sh   # 启动服务
+```
+/devops setup
 ```
 
-手动操作（不推荐）：
+检查并安装 Docker、Python 3.10+、venv 依赖、Node.js + agent-browser、`.env`、cookie 共享。幂等，可重复运行。
 
-```bash
-docker compose up -d                # 1. 启动 SearXNG + Redis
-pip install -e ".[dev]"             # 2. 安装 Python 依赖（首次）
-python -m adapter                   # 3. 启动 adapter
+### 2. 启动
+
+```
+/devops start
 ```
 
-- SearXNG: `http://127.0.0.1:3671`
-- adapter: `http://127.0.0.1:3672`
+启动 SearXNG（Docker）+ adapter（本地）。`start` 缺依赖时会自动调 `setup`。
 
-可选依赖（反爬页面需要）：
-
-```bash
-npm i -g agent-browser && agent-browser install
-```
-
-## 验证
+### 3. 验证
 
 ```bash
-# 基本搜索
 curl -X POST http://127.0.0.1:3672/v2/search \
   -H "Content-Type: application/json" \
   -d '{"query": "Python", "limit": 5}'
-
-# 中文搜索 + 域名过滤
-curl -X POST http://127.0.0.1:3672/v2/search \
-  -H "Content-Type: application/json" \
-  -d '{"query":"Python 教程","limit":10,"language":"zh-CN","includeDomains":["runoob.com"]}'
 ```
+
+### Cookie 登录
+
+部分网站需登录才能抓取。`AGENT_BROWSER_SESSION_NAME=firecrawl-adapter`（`setup.sh` 自动写入 `~/.zshrc`）使 agent-browser session 间 cookie 自动链式传递——关闭时保存，新 session 打开时自动加载。
+
+```
+/browser login https://example.com
+```
+
+登录后 adapter 的 headless 抓取自动携带 cookie。查看/清除：`/browser`。
+
+## 运维
+
+所有操作通过 Claude Code 的 `devops` 技能：
+
+| 命令 | 作用 |
+|------|------|
+| `/devops setup` | 首次安装依赖 |
+| `/devops start` | 启动 SearXNG + adapter |
+| `/devops stop` | 停止全部服务 |
+| `/devops reload` | 重载 adapter 代码 |
+| `/devops status` | 查看服务状态 |
+| `/devops logs` | 查看 adapter 日志 |
+| `/devops check` | pytest + ruff + mypy |
 
 ## API 端点
 
@@ -116,7 +101,7 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 
 ## 搜索引擎
 
-当前 **6 个引擎**（`searxng/settings.yml.template`）：
+**6 个引擎**（`searxng/settings.yml.template`，`start.sh` 根据 `.env` 生成）：
 
 | 引擎 | 直连 | 说明 |
 |------|------|------|
@@ -127,25 +112,11 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 | Yandex | ✅ | 中英文覆盖好 |
 | Presearch | ✅ | 去中心化搜索 |
 
-### 代理
+**代理**：`.env` 设 `SEARXNG_PROXY=http://host.docker.internal:7890` 解封 Google/Wikipedia。必须用 `host.docker.internal`（容器内 `127.0.0.1` 指向自身）。无代理时仅 bing/yandex/360 可用（~23 条）。
 
-在 `.env` 中设 `SEARXNG_PROXY`，`start.sh` 会自动注入 `searxng/settings.yml`：
+**兜底**：SearXNG 返回空时自动切 Bing HTML scrape（国内直连，中文友好）。
 
-```bash
-SEARXNG_PROXY=http://host.docker.internal:7890   # 启用（解封 Google/Wikipedia）
-# SEARXNG_PROXY=                                   # 留空=无代理
-```
-
-- 必须用 `host.docker.internal`（`127.0.0.1` 在容器内指向自身）
-- 无代理时仅 bing/yandex/360 可用（~23 条），Google/Wikipedia 需设 `disabled: true`
-
-### 兜底
-
-SearXNG 返回空时自动切 **Bing HTML scrape**（国内直连，中文友好）。
-
-### 已禁用
-
-百度/搜狗（持续 CAPTCHA）、DuckDuckGo/Mojeek（不稳定超时）、Brave/Startpage/Qwant/Wikidata/Yahoo/AOL/Seznam/Naver（不可用或覆盖差）。
+**已禁用**：百度/搜狗（CAPTCHA）、DuckDuckGo/Mojeek（不稳定）、Brave/Startpage/Qwant/Yahoo/Naver 等。
 
 ## 开发
 
