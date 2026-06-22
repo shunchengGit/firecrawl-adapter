@@ -33,7 +33,7 @@ if command -v agent-browser >/dev/null 2>&1; then
       cookies=$(python3 -c "import json;d=json.load(open('$f'));print(len(d.get('cookies',[])))" 2>/dev/null || echo "?")
       echo "    $(basename "$f") ($cookies cookies)"
     done
-    [ "$(ls ~/.agent-browser/sessions/*.json 2>/dev/null | wc -l)" -eq 0 ] && echo "    （无）"
+    if [ "$(ls ~/.agent-browser/sessions/*.json 2>/dev/null | wc -l)" -eq 0 ]; then echo "    （无）"; fi
   fi
 else
   echo "  ✗ 未安装"
