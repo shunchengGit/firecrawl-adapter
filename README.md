@@ -16,11 +16,11 @@ Firecrawl 适配器 (adapter/)   端口 3672
   │  实现 /v2/search, /v2/scrape, /v2/crawl 等 Firecrawl 协议
   ▼
 SearXNG 元搜索引擎 (Docker)   端口 3671
-  │  聚合多个搜索引擎；空时回退 DuckDuckGo Lite
+  │  聚合 6 个搜索引擎；空时回退 Bing HTML scrape
   ▼
-┌──────────┬────────┬──────┬───────────┐
-│  Google  │  Bing  │ Baidu│ DuckDuckGo│  ...
-└──────────┴────────┴──────┴───────────┘
+┌──────────┬────────┬──────┬──────────┬──────────┬───────────┐
+│  Google  │  Bing  │ 360  │ Wikipedia│  Yandex  │ Presearch │
+└──────────┴────────┴──────┴──────────┴──────────┴───────────┘
 ```
 
 ## 目录结构
@@ -116,6 +116,7 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 | `ADAPTER_MAX_JOBS` | `100` | 最大保留任务数 |
 | `ADAPTER_JOB_TTL` | `3600` | 任务保留时长（秒） |
 | `ADAPTER_MAX_BODY_BYTES` | `2097152` | 请求体最大字节数 |
+| `SEARXNG_PROXY` | `http://host.docker.internal:7890` | SearXNG 全局代理（留空=无代理） |
 | `SEARXNG_ENGINES` | `""` | 覆盖默认搜索引擎（逗号分隔） |
 | `SEARXNG_CATEGORIES` | `"general"` | 默认搜索分类 |
 
@@ -145,7 +146,7 @@ Python 包（见 `pyproject.toml`）：
 
 ## 搜索引擎
 
-当前配置（`searxng/settings.yml`）启用了 **6 个引擎**：
+当前配置（`searxng/settings.yml.template`，由 `start.sh` 根据 `.env` 生成 `settings.yml`）启用了 **6 个引擎**：
 
 | 引擎 | 直连 | 说明 |
 |------|------|------|
@@ -158,23 +159,23 @@ Python 包（见 `pyproject.toml`）：
 
 ### 代理配置
 
-`searxng/settings.yml` 的 `outgoing.proxies` 配置全局代理：
+在 `.env` 中设置 `SEARXNG_PROXY` 变量，`start.sh` 会自动注入到 `searxng/settings.yml`：
 
-```yaml
-outgoing:
-  proxies:
-    http: "http://host.docker.internal:7890"
-    https: "http://host.docker.internal:7890"
+```bash
+# .env
+SEARXNG_PROXY=http://host.docker.internal:7890   # 启用代理
+# SEARXNG_PROXY=                                   # 留空=无代理
 ```
 
 - **必须用 `host.docker.internal`**，不能写 `127.0.0.1`（容器内指向自身）
 - 代理解锁 Google/Wikipedia 等被墙引擎
 - **无代理**：只有 bing/yandex/360 可用（~23 条），Google/Wikipedia 需设 `disabled: true`
+- `start.sh` 读取 `.env` → 替换 `searxng/settings.yml.template` 的 `__SEARXNG_PROXY__` 占位符 → 生成 `searxng/settings.yml`
 
 ### 兜底机制
 
 SearXNG 返回空时自动切 **Bing HTML scrape**（国内直连，中文友好，无额外依赖）。
 
-### 已移除的引擎
+### 已禁用的引擎
 
-百度/搜狗（持续 CAPTCHA）、DuckDuckGo（偶发 CAPTCHA）、Mojeek（偶发超时）
+百度/搜狗（持续 CAPTCHA），DuckDuckGo/Mojeek（不稳定超时），Brave/Startpage/Qwant/Wikidata/Yahoo/AOL/Seznam/Naver（不可用或覆盖差）。详见 `searxng/settings.yml.template`。

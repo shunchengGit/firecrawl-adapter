@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Firecrawl API 的本地免费替代品。外部 agent（Hermes）把 `FIRECRAWL_API_URL` 指向本适配器；适配器把 Firecrawl 的 `/v2/*` 协议翻译成 SearXNG 搜索 + 直接抓取页面。无需付费 API key。Claude Code 也可以通过 MCP server 走本地搜索。
 
 ```
-Hermes / Claude Code (MCP) → adapter (端口 3672) → SearXNG (端口 3671) → Google/Bing/Baidu/...
-                                                    ↘ SearXNG 空时 → DuckDuckGo Lite (兜底)
+Hermes / Claude Code (MCP) → adapter (端口 3672) → SearXNG (端口 3671) → 6 引擎 (Google/Bing/360/Wikipedia/Yandex/Presearch)
+                                                    ↘ SearXNG 空时 → Bing HTML scrape (兜底)
 ```
 
 ## 常用命令
@@ -54,8 +54,8 @@ claude mcp get firecrawl-local  # 详情
 | `SEARXNG_BASE` | `http://127.0.0.1:3671` | adapter 指向 SearXNG 的地址 |
 | `FIRECRAWL_API_URL` | `http://127.0.0.1:3672` | Hermes / MCP 指向 adapter 的地址 |
 | `ADAPTER_MAX_SEARCH_RESULTS` | `20` | 单次搜索最大返回条数（>20 触发分页） |
-| `SEARXNG_ENGINES` | `""` | 覆盖 SearXNG 搜索引擎（逗号分隔） |
-| `SEARXNG_CATEGORIES` | `"general"` | 默认搜索分类 |
+| `SEARXNG_PROXY` | `http://host.docker.internal:7890` | SearXNG 全局代理（留空=无代理） |
+| `ADAPTER_CRAWL_TIMEOUT` | `300` | 单次 crawl 最长运行秒数 |
 
 ## 架构
 
@@ -63,7 +63,7 @@ claude mcp get firecrawl-local  # 详情
 
 - **`server.py`** — `ThreadingHTTPServer` + `BaseHTTPRequestHandler` 子类。只做路由 + JSON 读写 + 错误包装。每个端点都委托给 `handlers.*` 的函数。这是唯一接触 socket 的地方。
 - **`handlers.py`** — 每个端点一个函数（`handle_search`、`handle_scrape`、`handle_start_crawl`、`handle_crawl_status`、`handle_cancel_crawl`、`handle_extract`、`handle_map`）。每个接收解析后的 `body` dict，返回响应 dict。不感知 HTTP——这正是它们可单元测试的原因。
-- **`fetcher.py`** — 所有网络 I/O。`scrape_url()` 先用 `requests.get`；如果页面看起来被反爬挡住（启发式：可见文本 <500 字符，或含 WAF 关键词），回退到 `scrape_url_headless()`，它会 shell out 调 `agent-browser`。另有 `searxng_search()`（多页分页 + 引擎/分类/语言过滤）、`ddg_search()`（DuckDuckGo Lite 兜底）、`compile_search_query()`（query 编译，domain → site: / -site: 操作符）和 `map_url()`。
+- **`fetcher.py`** — 所有网络 I/O。`scrape_url()` 先用 `requests.get`；如果页面看起来被反爬挡住（启发式：可见文本 <500 字符，或含 WAF 关键词），回退到 `scrape_url_headless()`，它会 shell out 调 `agent-browser`。另有 `searxng_search()`（多页分页 + 引擎/分类/语言过滤）、`bing_search()`（Bing HTML scrape 兜底）、`compile_search_query()`（query 编译，domain → site: / -site: 操作符）和 `map_url()`。
 - **`jobs.py`** — 内存中的爬取任务存储（`_jobs` dict + 锁）。`crawl_worker()` 在 daemon 线程里运行，按 BFS 遍历同域链接，最多到 `max_depth`。`cleanup_old_jobs()` 强制 TTL + 最大数量限制——每次新建任务时调用，防止内存无限增长。
 - **`parser.py`** — 纯 HTML 辅助函数：`extract_main()`、`get_meta()`、`match_path()`、`html_to_markdown()`。线程局部的 `HTML2Text` 实例（该库非线程安全）。
 - **`config.py`** — 冻结的 `Config` dataclass，所有值来自环境变量带默认值。全局唯一的 `config` 实例被各处 import。
@@ -81,9 +81,9 @@ claude mcp get firecrawl-local  # 详情
 - **优雅关闭** — adapter 捕获 SIGTERM/SIGINT，标记运行中 crawl 为 cancelled、关 agent-browser daemon 落盘 cookie、再 shutdown。`server.shutdown()` 在新线程调用避免与 `serve_forever` 死锁。
 - **Docker 镜像里没有 agent-browser** — Dockerfile 只有 Python。headless 兜底只在本地运行模式下可用。不要尝试往镜像里加 agent-browser；构建时 Chromium 安装 + Chrome-for-Testing 下载会因网络限制失败。
 - **`_is_likely_blocked` 阈值（500 字符）** 会对合法的短页面误判（如 `example.com`）。这是为了抓 Cloudflare 挑战页有意为之，但内容极少的页面会有误报。
-- **SearXNG 配置以只读方式挂载** 通过 `docker-compose.yml` —— 本地编辑 `searxng/settings.yml`，重启容器生效。
+- **SearXNG 配置通过模板生成** — `start.sh` 读取 `.env` 中的 `SEARXNG_PROXY`，替换 `searxng/settings.yml.template` 的 `__SEARXNG_PROXY__` 占位符，生成 `searxng/settings.yml`。改代理只需改 `.env` 后重启，无需手动编辑 settings.yml。
 - **SearXNG 引擎选择** — 默认加载 243 个引擎会导致超时风暴。当前 6 个稳定引擎：360search / bing / google / wikipedia / yandex / presearch。百度/搜狗持续 CAPTCHA 已移除，mojeek/ddg 不稳定已禁用。
-- **SearXNG 代理** — `outgoing.proxies` 全局代理。容器内必须用 `host.docker.internal`（`127.0.0.1` 指向容器自身），不能写 `127.0.0.1`。当前代理 `host.docker.internal:7890`。代理解锁 google/wikipedia 等被墙引擎。**直连模式下只有 bing/yandex/360 可用**（~23 条/查询），代理下 ~38 条。
+- **SearXNG 代理** — 通过 `.env` 的 `SEARXNG_PROXY` 变量控制（留空=无代理）。容器内必须用 `host.docker.internal`（`127.0.0.1` 指向容器自身），不能写 `127.0.0.1`。代理解锁 google/wikipedia 等被墙引擎。**直连模式下只有 bing/yandex/360 可用**（~23 条/查询），代理下 ~38 条。
 - **搜索增强**（借鉴 [firecrawl](https://github.com/mendable/firecrawl)）：
   1. **Query 编译** — `compile_search_query()` 把 `includeDomains`/`excludeDomains` 编译为 `site:` / `-site:` 操作符注入 query
   2. **Limit×2 缓冲** — `fetch_limit = min(limit×2, max_search_results×2)`，多取一倍防过滤损失
@@ -92,7 +92,7 @@ claude mcp get firecrawl-local  # 详情
 
 ## SearXNG
 
-在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml`。
+在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml.template`，`start.sh` 根据 `.env` 生成 `searxng/settings.yml`。
 
 **引擎（6 个）**：360search bing google wikipedia yandex presearch。google/wikipedia 走代理，其余直连可用。百度/搜狗已移除（持续 CAPTCHA）。
 
