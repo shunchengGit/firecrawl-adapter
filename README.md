@@ -1,6 +1,6 @@
 # firecrawl-adapter
 
-Firecrawl API 的本地免费替代品。通过 SearXNG 元搜索引擎 + 协议适配器，为 Hermes / Claude Code (MCP) 提供 `web_search`、`web_scrape`、`web_crawl` 等能力，无需付费 API key。
+Firecrawl API 的本地免费替代品。通过 SearXNG 元搜索引擎 + 协议适配器，为 Hermes / Claude Code (MCP) 提供 `web_search`、`web_scrape`、`web_crawl` 等能力，无需付费 API key。**必须在 Claude Code 中通过 `devops` 技能操作。**
 
 > GitHub: [shunchengGit/firecrawl-adapter](https://github.com/shunchengGit/firecrawl-adapter)
 
@@ -33,15 +33,27 @@ Google / Bing / 360 / Wikipedia / Yandex / Presearch
 
 ## 快速启动
 
+> **必须通过 Claude Code 操作**，在 Claude Code 会话中使用 `devops` 技能管理服务：
+> ```
+> /devops setup    # 首次安装依赖（Docker/Python/venv/agent-browser/.env）
+> /devops start    # 启动 SearXNG + adapter
+> /devops stop     # 停止全部服务
+> /devops reload   # 重载 adapter 代码
+> /devops status   # 查看服务状态
+> /devops logs     # 查看 adapter 日志
+> /devops check    # pytest + ruff + mypy
+> ```
+
 SearXNG 用 Docker 最省心；adapter 本地跑最灵活（agent-browser 兜底可用）。
 
+也可直接调脚本：
+
 ```bash
-# 一键安装依赖 + 启动
-./.claude/skills/devops/scripts/setup.sh
-./.claude/skills/devops/scripts/start.sh
+./.claude/skills/devops/scripts/setup.sh   # 首次安装依赖
+./.claude/skills/devops/scripts/start.sh   # 启动服务
 ```
 
-或手动操作：
+手动操作（不推荐）：
 
 ```bash
 docker compose up -d                # 1. 启动 SearXNG + Redis
