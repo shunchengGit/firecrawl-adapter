@@ -1,6 +1,6 @@
 # firecrawl-adapter
 
-Firecrawl API 的本地免费替代。SearXNG 元搜索 + 协议适配，为 Claude Code (MCP) / Hermes 提供 `web_search`、`web_scrape`、`web_crawl`，无需付费 API key。**必须在 Claude Code 中通过 `devops` 技能操作。**
+Firecrawl API 的本地免费替代。SearXNG 元搜索 + 协议适配，为 Claude Code (MCP) / Hermes 提供 `web_search`、`web_scrape`、`web_crawl`，无需付费 API key。**在 Claude Code 中运行**，服务管理用 `/devops`，Cookie 登录用 `/browser`，部署用 `/deploy`。
 
 > GitHub: [shunchengGit/firecrawl-adapter](https://github.com/shunchengGit/firecrawl-adapter)
 
@@ -47,13 +47,15 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 
 ### Cookie 登录
 
-部分网站需登录才能抓取。`AGENT_BROWSER_SESSION_NAME=firecrawl-adapter`（`setup.sh` 自动写入 `~/.zshrc`）使 agent-browser session 间 cookie 自动链式传递——关闭时保存，新 session 打开时自动加载。
+部分网站需登录后才能看到内容（如钉钉知识库）。要让 adapter 抓取到这些页面，只需手动登录一次：
 
-```
-/browser login https://example.com
-```
+1. 在 Claude Code 中执行 `/browser`，让它打开浏览器
+2. 在浏览器中完成登录
+3. 关闭浏览器（cookie 自动保存）
 
-登录后 adapter 的 headless 抓取自动携带 cookie。查看/清除：`/browser`。
+之后 adapter 的每次 headless 抓取都会自动加载这些 cookie，无需再次登录。
+
+> 原理：`setup.sh` 在 `~/.zshrc` 中设置了 `AGENT_BROWSER_SESSION_NAME=firecrawl-adapter`，agent-browser 的每个 session 关闭时会把 cookie 存到共享文件，新 session 打开时自动加载，形成传递链。
 
 ## 运维
 
