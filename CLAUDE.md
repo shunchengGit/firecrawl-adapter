@@ -54,7 +54,7 @@ claude mcp get firecrawl-local  # 详情
 | `SEARXNG_BASE` | `http://127.0.0.1:3671` | adapter 指向 SearXNG 的地址 |
 | `FIRECRAWL_API_URL` | `http://127.0.0.1:3672` | Hermes / MCP 指向 adapter 的地址 |
 | `ADAPTER_MAX_SEARCH_RESULTS` | `20` | 单次搜索最大返回条数（>20 触发分页） |
-| `SEARXNG_PROXY` | `http://host.docker.internal:7890` | SearXNG 全局代理（留空=无代理） |
+| `SEARXNG_PROXY` | `""` | SearXNG 全局代理（留空=无代理；设置示例见 SearXNG 章节） |
 | `ADAPTER_CRAWL_TIMEOUT` | `300` | 单次 crawl 最长运行秒数 |
 
 ## 架构
@@ -94,7 +94,14 @@ claude mcp get firecrawl-local  # 详情
 
 在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml.template`，`start.sh` 根据 `.env` 生成 `searxng/settings.yml`。
 
-**引擎（6 个）**：360search bing google wikipedia yandex presearch。google/wikipedia 走代理，其余直连可用。百度/搜狗已移除（持续 CAPTCHA）。
+**引擎（6 个）**：360search bing google wikipedia yandex presearch。google/wikipedia 需代理，其余直连可用。百度/搜狗已移除（持续 CAPTCHA）。
+
+**代理**：默认无代理。如需解封 Google/Wikipedia，在 `.env` 中设置：
+```bash
+SEARXNG_PROXY=http://host.docker.internal:7890
+```
+- 必须用 `host.docker.internal`（`127.0.0.1` 在容器内指向自身）
+- 改后重启生效：`start.sh` 会将值注入 `searxng/settings.yml`
 
 `secret_key` 硬编码为 `"hermes-searxng-local"` —— 仅本地用可以，但不要对外暴露。主机端口由 `SEARXNG_PORT` 控制（默认 3671）→ 容器内 8080。
 

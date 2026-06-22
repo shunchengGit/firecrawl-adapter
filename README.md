@@ -97,7 +97,7 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 | `ADAPTER_MAX_JOBS` | `100` | 最大保留任务数 |
 | `ADAPTER_JOB_TTL` | `3600` | 任务保留时长（秒） |
 | `ADAPTER_MAX_BODY_BYTES` | `2097152` | 请求体最大字节数 |
-| `SEARXNG_PROXY` | `http://host.docker.internal:7890` | SearXNG 代理（留空=无代理） |
+| `SEARXNG_PROXY` | `""` | SearXNG 代理（留空=无代理） |
 
 ## 7. 搜索引擎
 
@@ -114,7 +114,13 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 
 ### 7.1. 代理
 
-`.env` 设 `SEARXNG_PROXY=http://host.docker.internal:7890` 解封 Google/Wikipedia。必须用 `host.docker.internal`（容器内 `127.0.0.1` 指向自身）。无代理时仅 bing/yandex/360 可用（~23 条）。
+默认无代理。如需解封 Google/Wikipedia，在 `.env` 中设置：
+
+```bash
+SEARXNG_PROXY=http://host.docker.internal:7890
+```
+
+必须用 `host.docker.internal`（容器内 `127.0.0.1` 指向自身）。改后重启生效。无代理时仅 bing/yandex/360 可用（~23 条）。
 
 ### 7.2. 兜底
 
