@@ -19,8 +19,8 @@ if ! command -v agent-browser >/dev/null 2>&1; then
   exit 1
 fi
 
-# 若自己的 daemon 已在跑（可能 headless），先关掉
-agent-browser --session "$SESSION" close 2>/dev/null || true
+# 先关闭所有已运行的 agent-browser daemon（可能 headless），确保 headed 生效
+agent-browser close 2>/dev/null || true
 
 echo "==> 用 headed 浏览器打开: $URL"
 echo "    请在弹出的浏览器窗口里完成登录"
