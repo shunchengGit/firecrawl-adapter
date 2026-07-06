@@ -29,12 +29,19 @@ if command -v agent-browser >/dev/null 2>&1; then
   fi
   if [ -d ~/.agent-browser/sessions ]; then
     echo "  state 文件:"
-    ls -1 ~/.agent-browser/sessions/*.json 2>/dev/null | while read f; do
+    found_sessions=0
+    for f in ~/.agent-browser/sessions/*.json; do
+      [ -e "$f" ] || continue
+      found_sessions=1
       cookies=$(python3 -c "import json;d=json.load(open('$f'));print(len(d.get('cookies',[])))" 2>/dev/null || echo "?")
       echo "    $(basename "$f") ($cookies cookies)"
     done
-    if [ "$(ls ~/.agent-browser/sessions/*.json 2>/dev/null | wc -l)" -eq 0 ]; then echo "    （无）"; fi
+    if [ "$found_sessions" -eq 0 ]; then
+      echo "    （无）"
+    fi
   fi
 else
   echo "  ✗ 未安装"
 fi
+
+exit 0
