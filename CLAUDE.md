@@ -2,128 +2,89 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 这是什么
+## 项目概览
 
-Firecrawl API 的本地免费替代品。外部 agent（Hermes）把 `FIRECRAWL_API_URL` 指向本适配器；适配器把 Firecrawl 的 `/v2/*` 协议翻译成 SearXNG 搜索 + 直接抓取页面。无需付费 API key。Claude Code 也可以通过 MCP server 走本地搜索。
+`firecrawl-adapter` 是本地 Firecrawl 协议适配器。客户端调用 `/v1/*` 或 `/v2/*` HTTP API；adapter 将搜索请求转给本地 SearXNG，并直接抓取网页。SearXNG 与 Valkey 在 Docker 中运行，adapter 通常作为宿主机 Python 进程运行，以便被反爬拦截时调用宿主机上的 `agent-browser`。
 
-```
-Hermes / Claude Code (MCP) → adapter (端口 3672) → SearXNG (端口 3671) → 6 引擎 (Google/Bing/360/Wikipedia/Yandex/Presearch)
-                                                    ↘ SearXNG 空时 → Bing HTML scrape (兜底)
-```
+面向使用者的安装、Cookie 登录、API 示例及 Hermes / Claude Code MCP 部署说明见 `README.md`。服务生命周期操作优先使用项目的 `devops` skill 或其脚本。
 
 ## 常用命令
 
 ```bash
-# 运维（devops skill 封装，推荐）
-./.claude/skills/devops/scripts/start.sh        # 启动 SearXNG + adapter
-./.claude/skills/devops/scripts/stop.sh         # 停止全部服务
-./.claude/skills/devops/scripts/reload.sh        # 重载 adapter 代码
-./.claude/skills/devops/scripts/status.sh       # 查看服务状态
-./.claude/skills/devops/scripts/logs.sh         # 查看 adapter 日志
-./.claude/skills/devops/scripts/check.sh        # pytest + ruff + mypy 一次性检查
+# 首次安装：检查 Docker/Python 3.10+，创建 .venv，安装开发依赖，配置 .env
+./.claude/skills/devops/scripts/setup.sh
 
-# 手动运行 adapter（需先启动 SearXNG）
-docker compose up -d            # 只启动 SearXNG + Redis
-python -m adapter               # 在 :3672 启动 adapter
+# 推荐的服务生命周期；start 会生成 SearXNG 配置、启动 Docker 服务并在本地运行 adapter
+./.claude/skills/devops/scripts/start.sh
+./.claude/skills/devops/scripts/reload.sh
+./.claude/skills/devops/scripts/status.sh
+./.claude/skills/devops/scripts/logs.sh [adapter|searxng|redis]
+./.claude/skills/devops/scripts/stop.sh
 
-# 测试 / lint / 类型检查
-pytest                          # 全部测试
-pytest tests/test_parser.py::test_match_path_wildcard   # 单个测试
-ruff check adapter/ tests/      # lint（自动修复加 --fix）
-mypy adapter/                   # 类型检查（必须 0 错误）
+# 一次运行 pytest + ruff + mypy
+./.claude/skills/devops/scripts/check.sh
 
-# 重新构建 Docker adapter 镜像（可选，全 Docker 模式）
-docker compose up -d --build
+# 测试、单文件与单个测试
+./.claude/skills/devops/scripts/test.sh
+./.claude/skills/devops/scripts/test.sh tests/test_parser.py
+./.claude/skills/devops/scripts/test.sh tests/test_parser.py::test_match_path_wildcard
+python -m pytest -q
+python -m pytest tests/test_parser.py::test_match_path_wildcard -v
 
-# Claude Code MCP（firecrawl-local，已配在 user scope）
-claude mcp list                 # 查看状态
-claude mcp get firecrawl-local  # 详情
+# lint 与类型检查
+./.claude/skills/devops/scripts/lint.sh
+./.claude/skills/devops/scripts/lint.sh --fix
+./.claude/skills/devops/scripts/typecheck.sh
+python -m ruff check adapter/ tests/
+python -m mypy adapter/
+
+# 手动运行：compose 只启动 SearXNG 与 Valkey，不会启动 adapter
+docker compose up -d
+python -m adapter                 # 也可用 firecrawl-adapter
+
+# 构建 wheel（Hatchling 后端）
+python -m pip wheel .
 ```
 
-系统 Python 是 3.9，但 `pyproject.toml` 目标 3.10+。包内用了 `from __future__ import annotations`，所以 3.9 也能 import，但开发工具（ruff/mypy）按 3.10+ 处理。开发依赖安装：`pip install -e ".[dev]"`。
+项目要求 Python 3.10+。Ruff 目标版本为 3.10、行长 100；测试文件忽略 E501。Mypy 的检查范围是 `adapter/`。开发依赖可直接用 `python -m pip install -e ".[dev]"` 安装。
 
-## 配置
+仓库的 Compose 配置没有 adapter service 或 `build` 段；`docker compose up -d --build` 不会从本仓库的 Dockerfile 构建并运行 adapter。
 
-所有端口和地址通过项目根的 `.env` 管理（已 gitignore，从 `.env.example` 复制）。`docker compose` 自动读 `.env`；`python -m adapter` 通过 `python-dotenv`（在 `adapter/config.py` 启动时加载）读 `.env`。
+## 架构与修改边界
 
-| 变量 | 默认值 | 用途 |
-|------|--------|------|
-| `SEARXNG_PORT` | `3671` | SearXNG 主机端口（容器内固定 8080） |
-| `ADAPTER_HOST` | `127.0.0.1` | adapter 监听地址 |
-| `ADAPTER_PORT` | `3672` | adapter 监听端口 |
-| `SEARXNG_BASE` | `http://127.0.0.1:3671` | adapter 指向 SearXNG 的地址 |
-| `FIRECRAWL_API_URL` | `http://127.0.0.1:3672` | Hermes / MCP 指向 adapter 的地址 |
-| `ADAPTER_MAX_SEARCH_RESULTS` | `20` | 单次搜索最大返回条数（>20 触发分页） |
-| `SEARXNG_PROXY` | `""` | SearXNG 全局代理（留空=无代理；设置示例见 SearXNG 章节） |
-| `ADAPTER_CRAWL_TIMEOUT` | `300` | 单次 crawl 最长运行秒数 |
+- **`adapter/server.py` 是 HTTP 边界。** 使用 `ThreadingHTTPServer`，负责请求体限制、JSON 解析、路由、HTTP 错误映射、健康检查和优雅关闭。端点业务逻辑应留在 handlers 中；这是唯一应接触 socket 的模块。
+- **`adapter/handlers.py` 定义端点语义。** 每个 handler 接收解析后的 dict 并返回响应 dict，负责参数验证和 Firecrawl 兼容的响应形状，因此可以脱离 HTTP 层单测。
+- **`adapter/fetcher.py` 集中所有网络 I/O。** 搜索会把域名过滤编译为 `site:` / `-site:`，将 Firecrawl source 类型映射为 SearXNG 分类，以两倍数量预取后过滤；仅当 SearXNG 返回空结果时使用 Bing HTML scrape 兜底。抓取先尝试 `requests`，失败或疑似受阻时调用 `agent-browser`。
+- **`adapter/parser.py` 是 HTML 纯辅助层。** `HTML2Text` 实例必须保持线程局部，因为 HTTP handler 与 crawl worker 会并发运行。
+- **`adapter/jobs.py` 管理进程内 crawl job。** `POST /crawl` 创建 daemon thread 后立即返回；worker 按同 host BFS 遍历，并受深度、路径过滤、页面数、队列大小及整体超时限制。任务不持久化，adapter 重启后会消失；状态分页使用本地 `?page=N`。
+- **`adapter/config.py` 在 import 时加载配置。** 它从项目根 `.env` 读取环境变量并创建冻结的全局 `config` 单例；修改 `.env` 后必须重启 adapter，运行中不会自动重载。
 
-## 架构
+关键数据流：
 
-`adapter/` 包按职责拆分——HTTP 层很薄，业务逻辑放在返回 dict 的纯函数里：
-
-- **`server.py`** — `ThreadingHTTPServer` + `BaseHTTPRequestHandler` 子类。只做路由 + JSON 读写 + 错误包装。每个端点都委托给 `handlers.*` 的函数。这是唯一接触 socket 的地方。
-- **`handlers.py`** — 每个端点一个函数（`handle_search`、`handle_scrape`、`handle_start_crawl`、`handle_crawl_status`、`handle_cancel_crawl`、`handle_extract`、`handle_map`）。每个接收解析后的 `body` dict，返回响应 dict。不感知 HTTP——这正是它们可单元测试的原因。
-- **`fetcher.py`** — 所有网络 I/O。`scrape_url()` 先用 `requests.get`；如果页面看起来被反爬挡住（启发式：可见文本 <500 字符，或含 WAF 关键词），回退到 `scrape_url_headless()`，它会 shell out 调 `agent-browser`。另有 `searxng_search()`（多页分页 + 引擎/分类/语言过滤）、`bing_search()`（Bing HTML scrape 兜底）、`compile_search_query()`（query 编译，domain → site: / -site: 操作符）和 `map_url()`。
-- **`jobs.py`** — 内存中的爬取任务存储（`_jobs` dict + 锁）。`crawl_worker()` 在 daemon 线程里运行，按 BFS 遍历同域链接，最多到 `max_depth`。`cleanup_old_jobs()` 强制 TTL + 最大数量限制——每次新建任务时调用，防止内存无限增长。
-- **`parser.py`** — 纯 HTML 辅助函数：`extract_main()`、`get_meta()`、`match_path()`、`html_to_markdown()`。线程局部的 `HTML2Text` 实例（该库非线程安全）。
-- **`config.py`** — 冻结的 `Config` dataclass，所有值来自环境变量带默认值。全局唯一的 `config` 实例被各处 import。
-
-**`/v2/scrape` 的关键流程：** `server.do_POST` → `handlers.handle_scrape`（重试 3 次）→ `fetcher.scrape_url` → requests.get → 失败时 → `scrape_url_headless`（子进程调 `agent-browser`）→ `parser` 构建 markdown/metadata/links。
-
-**Crawl 是异步的：** `POST /v2/crawl` 立即返回 job_id，spawn `_crawl_worker` 线程，客户端轮询 `GET /v2/crawl/:id`。分页用虚拟的 `?page=N` 查询参数（真正的 Firecrawl 用不透明的 `next` URL——这里做了简化）。
-
-## 踩过的坑 / 非显而易见的事
-
-- **agent-browser 每次抓取后 close 自己的 session** — `scrape_url_headless` 随机生成 `adapter_<8hex>` session 名，finally 里只 close 自己，不杀其他 daemon（Hermes）。session 名随机化避免残留 daemon 冲突。
-- **agent-browser cookie 共享**：`AGENT_BROWSER_SESSION_NAME=firecrawl-adapter`（`~/.zshrc`，`_env.sh` 默认值）使 agent-browser 原生支持跨 session cookie 互通——`close` 时自动保存到 `firecrawl-adapter-<session>.json`，新 session `open` 时自动从最新文件加载。不同 `--session` 各自独立 daemon，无并发冲突。不需共享 Chrome profile，不需 wrapper。
-- **`/healthz` 探测 SearXNG** — 返回 `{"status":"ok"|"degraded","searxng":"up"|"down"}`，不只是 adapter 自身存活。SearXNG 不可达时 status 为 degraded。
-- **crawl 有整体超时** — `ADAPTER_CRAWL_TIMEOUT`（默认 300s）控制单次 crawl 最长运行时间，超时 job 状态变 `timeout`（非 `completed`）。
-- **优雅关闭** — adapter 捕获 SIGTERM/SIGINT，标记运行中 crawl 为 cancelled、关 agent-browser daemon 落盘 cookie、再 shutdown。`server.shutdown()` 在新线程调用避免与 `serve_forever` 死锁。
-- **Docker 镜像里没有 agent-browser** — Dockerfile 只有 Python。headless 兜底只在本地运行模式下可用。不要尝试往镜像里加 agent-browser；构建时 Chromium 安装 + Chrome-for-Testing 下载会因网络限制失败。
-- **`_is_likely_blocked` 阈值（500 字符）** 会对合法的短页面误判（如 `example.com`）。这是为了抓 Cloudflare 挑战页有意为之，但内容极少的页面会有误报。
-- **SearXNG 配置通过模板生成** — `start.sh` 读取 `.env` 中的 `SEARXNG_PROXY`，替换 `searxng/settings.yml.template` 的 `__SEARXNG_PROXY__` 占位符，生成 `searxng/settings.yml`。改代理只需改 `.env` 后重启，无需手动编辑 settings.yml。
-- **SearXNG 引擎选择** — 默认加载 243 个引擎会导致超时风暴。当前 6 个稳定引擎：360search / bing / google / wikipedia / yandex / presearch。百度/搜狗持续 CAPTCHA 已移除，mojeek/ddg 不稳定已禁用。
-- **SearXNG 代理** — 通过 `.env` 的 `SEARXNG_PROXY` 变量控制（留空=无代理）。容器内必须用 `host.docker.internal`（`127.0.0.1` 指向容器自身），不能写 `127.0.0.1`。代理解锁 google/wikipedia 等被墙引擎。**直连模式下只有 bing/yandex/360 可用**（~23 条/查询），代理下 ~38 条。
-- **搜索增强**（借鉴 [firecrawl](https://github.com/mendable/firecrawl)）：
-  1. **Query 编译** — `compile_search_query()` 把 `includeDomains`/`excludeDomains` 编译为 `site:` / `-site:` 操作符注入 query
-  2. **Limit×2 缓冲** — `fetch_limit = min(limit×2, max_search_results×2)`，多取一倍防过滤损失
-  3. **Bing 兜底** — SearXNG 返回空时自动切 Bing HTML scrape（国内直连，中文友好）
-- **SearXNG 搜索分页** — `searxng_search()` 当 `limit > 20`（SearXNG 每页默认 20 条）时自动循环获取多页。代理启用后 page 2/3 有真实数据（6 引擎 vs 之前 3 引擎只有 1 页）。支持 `engines`、`categories`、`language` 参数。`handle_search` 接受 `sources: [{type: "web"|"news"|"images"}]` 映射到 SearXNG 分类，响应含 `searchId`（uuid4 hex）供后续反馈。
-
-## SearXNG
-
-在 Docker 里跑（`docker compose up -d`）。配置在 `searxng/settings.yml.template`，`start.sh` 根据 `.env` 生成 `searxng/settings.yml`。
-
-**引擎（6 个）**：360search bing google wikipedia yandex presearch。google/wikipedia 需代理，其余直连可用。百度/搜狗已移除（持续 CAPTCHA）。
-
-**代理**：默认无代理。如需解封 Google/Wikipedia，在 `.env` 中设置：
-```bash
-SEARXNG_PROXY=http://host.docker.internal:7890
+```text
+POST /search → server → handle_search → compile query → SearXNG → 空结果时 Bing fallback
+POST /scrape → server → handle_scrape（最多重试 3 次）→ requests → blocked 时 agent-browser → parser
+POST /crawl → server → 创建内存 job + daemon worker → scrape_url → BFS → 客户端轮询状态
 ```
-- 必须用 `host.docker.internal`（`127.0.0.1` 在容器内指向自身）
-- 改后重启生效：`start.sh` 会将值注入 `searxng/settings.yml`
 
-`secret_key` 硬编码为 `"hermes-searxng-local"` —— 仅本地用可以，但不要对外暴露。主机端口由 `SEARXNG_PORT` 控制（默认 3671）→ 容器内 8080。
+## API 兼容约束
 
-## Claude Code MCP 集成
+- `/v1` 与 `/v2` 都支持 search、scrape、crawl 和 map；extract 当前仅支持 `POST /v2/extract`。
+- `/health` 与 `/healthz` 无论 SearXNG 是否可达都返回 HTTP 200；需检查 JSON 中的 `status: "ok" | "degraded"` 和 `searxng: "up" | "down"`。
+- 扩展 handler 时保留现有响应形状。搜索响应包含 `data.web` 与本地生成的 `searchId`；crawl 状态中的 `next` 是带 `?page=N` 的相对 URL，不是真正 Firecrawl 的不透明 cursor。
 
-本适配器已作为 MCP server `firecrawl-local` 注册到 Claude Code 的 user scope（全局，所有项目可用），配置在 `~/.claude.json`：
+## SearXNG 与浏览器约束
 
-- 命令：`npx -y firecrawl-mcp`
-- 环境变量：`FIRECRAWL_API_URL=http://127.0.0.1:3672`、`FIRECRAWL_API_KEY=local`（占位，本地不校验）
-- 暴露工具：`firecrawl_search`、`firecrawl_scrape` 等，走本地 adapter
+- `searxng/settings.yml` 是 gitignored 生成物。`start.sh` 从 `searxng/settings.yml.template` 渲染，并替换 `SEARXNG_PROXY`；不要把生成文件当作配置源直接修改。
+- 宿主机代理从 SearXNG 容器内应写为 `host.docker.internal`，不能使用容器内指向自身的 `127.0.0.1`。
+- 抓取的 blocked-page 启发式有意把可见文本少于 500 字符或包含反机器人标记的页面判为疑似受阻；合法短页面也可能触发浏览器回退，不要在未评估反爬效果前移除该逻辑。
+- 每次 headless fallback 使用独立的 `adapter_<id>` session，并只关闭自己创建的 session。adapter 优雅关闭时会取消运行中的 crawl，并调用 `agent-browser close --all` 使浏览器会话落盘。
+- Dockerfile 中没有 `agent-browser`；需要浏览器回退时应保持 adapter 在宿主机运行，不要假定容器运行具有等价能力。
 
-**前置条件**：使用前必须确保 SearXNG + adapter 在跑，否则 MCP 工具会失败。
+## 测试分层
 
-**内置 WebSearch 已禁用**：`~/.claude/settings.json` 的 `permissions.deny` 含 `"WebSearch"`，强制模型走 MCP 工具。恢复内置搜索则删掉该字段。
+正常测试套件应保持离线且确定性，不依赖正在运行的 SearXNG：
 
-**Claude Code 内置 WebSearch 走的是 Anthropic API 后端**，无法直接指向本地 Firecrawl 端点（没有 `FIRECRAWL_API_URL` 之类的配置项，`ANTHROPIC_BASE_URL` 也只影响模型推理流量）。MCP 是唯一让 Claude Code 走本地搜索的方式。
-
-**添加/移除 MCP**：
-```bash
-claude mcp add firecrawl-local -s user \
-  -e FIRECRAWL_API_URL=http://127.0.0.1:3672 \
-  -e FIRECRAWL_API_KEY=local \
-  -- npx -y firecrawl-mcp
-claude mcp remove firecrawl-local -s user
-```
+- `tests/test_parser.py`：parser 纯函数行为；
+- `tests/test_handlers.py`：handler 验证、响应形状及 mock 后的上游交互；
+- `tests/test_routing.py`：通过进程内 `ThreadingHTTPServer` 验证 HTTP 路由和错误映射。
