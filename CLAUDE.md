@@ -56,7 +56,7 @@ python -m pip wheel .
 - **`adapter/handlers.py` 定义端点语义。** 每个 handler 接收解析后的 dict 并返回响应 dict，负责参数验证和 Firecrawl 兼容的响应形状，因此可以脱离 HTTP 层单测。
 - **`adapter/fetcher.py` 集中所有网络 I/O。** 搜索会把域名过滤编译为 `site:` / `-site:`，将 Firecrawl source 类型映射为 SearXNG 分类，以两倍数量预取后过滤；仅当 SearXNG 返回空结果时使用 Bing HTML scrape 兜底。抓取先尝试 `requests`，失败或疑似受阻时调用 `agent-browser`。
 - **`adapter/parser.py` 是 HTML 纯辅助层。** `HTML2Text` 实例必须保持线程局部，因为 HTTP handler 与 crawl worker 会并发运行。
-- **`adapter/jobs.py` 管理进程内 crawl job。** `POST /crawl` 创建 daemon thread 后立即返回；worker 按同 host BFS 遍历，并受深度、路径过滤、页面数、队列大小及整体超时限制。任务不持久化，adapter 重启后会消失；状态分页使用本地 `?page=N`。
+- **`adapter/jobs.py` 管理进程内 crawl job。** Crawl 由有界 `ThreadPoolExecutor` 调度，状态按 `queued → scraping → completed|failed|cancelled|timeout` 转换；worker 按同 host 串行 BFS，并增量发布结果和进度。活跃及排队任务分别受配置限制，终态不可被覆盖，TTL/容量清理只删除终态任务。任务不持久化，adapter 重启后会消失；状态分页使用本地 `?page=N`。取消和超时是协作式的，正在执行的同步页面抓取可能先返回，但不得继续发布或调度。
 - **`adapter/config.py` 在 import 时加载配置。** 它从项目根 `.env` 读取环境变量并创建冻结的全局 `config` 单例；修改 `.env` 后必须重启 adapter，运行中不会自动重载。
 
 关键数据流：
@@ -64,14 +64,14 @@ python -m pip wheel .
 ```text
 POST /search → server → handle_search → compile query → SearXNG → 空结果时 Bing fallback
 POST /scrape → server → handle_scrape（最多重试 3 次）→ requests → blocked 时 agent-browser → parser
-POST /crawl → server → 创建内存 job + daemon worker → scrape_url → BFS → 客户端轮询状态
+POST /crawl → server → 校验并准入内存 job → 有界 dispatcher → scrape_url → BFS → 客户端轮询增量状态
 ```
 
 ## API 兼容约束
 
 - `/v1` 与 `/v2` 都支持 search、scrape、crawl 和 map；extract 当前仅支持 `POST /v2/extract`。
 - `/health` 与 `/healthz` 无论 SearXNG 是否可达都返回 HTTP 200；需检查 JSON 中的 `status: "ok" | "degraded"` 和 `searxng: "up" | "down"`。
-- 扩展 handler 时保留现有响应形状。搜索响应包含 `data.web` 与本地生成的 `searchId`；crawl 状态中的 `next` 是带 `?page=N` 的相对 URL，不是真正 Firecrawl 的不透明 cursor。
+- 扩展 handler 时保留现有响应形状。搜索响应包含 `data.web` 与本地生成的 `searchId`；crawl 状态中的 `next` 是带 `?page=N` 的相对 URL，不是真正 Firecrawl 的不透明 cursor。Crawl 状态还包含 `discovered`、`queued`、`completed`、`failed`、`skipped`；容量耗尽以 `code: "crawl_capacity_exhausted"` 表示。
 
 ## SearXNG 与浏览器约束
 

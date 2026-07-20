@@ -28,6 +28,14 @@ class Config:
     max_body_bytes: int
     max_search_results: int
     crawl_timeout: int
+    crawl_default_limit: int
+    crawl_default_depth: int
+    max_crawl_limit: int
+    max_crawl_depth: int
+    max_crawl_path_filters: int
+    max_crawl_path_length: int
+    max_active_crawls: int
+    max_queued_crawls: int
     searxng_engines: str
     searxng_categories: str
 
@@ -45,6 +53,14 @@ class Config:
             max_body_bytes=int(os.getenv("ADAPTER_MAX_BODY_BYTES", str(2 * 1024 * 1024))),
             max_search_results=int(os.getenv("ADAPTER_MAX_SEARCH_RESULTS", "20")),
             crawl_timeout=int(os.getenv("ADAPTER_CRAWL_TIMEOUT", "300")),
+            crawl_default_limit=int(os.getenv("ADAPTER_CRAWL_DEFAULT_LIMIT", "10")),
+            crawl_default_depth=int(os.getenv("ADAPTER_CRAWL_DEFAULT_DEPTH", "1")),
+            max_crawl_limit=int(os.getenv("ADAPTER_MAX_CRAWL_LIMIT", "100")),
+            max_crawl_depth=int(os.getenv("ADAPTER_MAX_CRAWL_DEPTH", "5")),
+            max_crawl_path_filters=int(os.getenv("ADAPTER_MAX_CRAWL_PATH_FILTERS", "32")),
+            max_crawl_path_length=int(os.getenv("ADAPTER_MAX_CRAWL_PATH_LENGTH", "256")),
+            max_active_crawls=int(os.getenv("ADAPTER_MAX_ACTIVE_CRAWLS", "4")),
+            max_queued_crawls=int(os.getenv("ADAPTER_MAX_QUEUED_CRAWLS", "16")),
             searxng_engines=os.getenv("SEARXNG_ENGINES", ""),
             searxng_categories=os.getenv("SEARXNG_CATEGORIES", "general"),
         )

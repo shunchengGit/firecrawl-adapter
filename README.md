@@ -82,6 +82,8 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 | POST | `/v2/extract` | 批量抓取（最多 5 URL） |
 | POST | `/v2/map` | 获取站点链接列表 |
 
+Crawl 任务保存在 adapter 进程内，重启后不会恢复。提交后任务先处于 `queued`，取得执行槽后转为 `scraping`，最终进入 `completed`、`failed`、`cancelled` 或 `timeout`；活跃与排队数量都有上限，容量用尽时返回 `code: "crawl_capacity_exhausted"`。状态响应会增量返回已成功页面，并包含 `discovered`、`queued`、`completed`、`failed`、`skipped` 计数。取消和超时是协作式的：正在执行的同步单页抓取可能需要先返回，但之后不会继续抓取或发现页面。
+
 ## 6. 配置
 
 在 `.env` 中设置（从 `.env.example` 复制）：
@@ -93,9 +95,17 @@ curl -X POST http://127.0.0.1:3672/v2/search \
 | `ADAPTER_PORT` | `3672` | adapter 监听端口 |
 | `ADAPTER_MAX_SEARCH_RESULTS` | `20` | 单次搜索最大条数 |
 | `ADAPTER_MAX_SCRAPE` | `60000` | 单页抓取最大字符数 |
-| `ADAPTER_CRAWL_TIMEOUT` | `300` | 单次爬取超时（秒） |
-| `ADAPTER_MAX_JOBS` | `100` | 最大保留任务数 |
-| `ADAPTER_JOB_TTL` | `3600` | 任务保留时长（秒） |
+| `ADAPTER_CRAWL_TIMEOUT` | `300` | Crawl 开始执行后的整体超时（秒） |
+| `ADAPTER_CRAWL_DEFAULT_LIMIT` | `10` | Crawl 默认页面数 |
+| `ADAPTER_CRAWL_DEFAULT_DEPTH` | `1` | Crawl 默认发现深度 |
+| `ADAPTER_MAX_CRAWL_LIMIT` | `100` | 单个 Crawl 最大页面数 |
+| `ADAPTER_MAX_CRAWL_DEPTH` | `5` | 单个 Crawl 最大发现深度 |
+| `ADAPTER_MAX_CRAWL_PATH_FILTERS` | `32` | include/exclude 各自最大规则数 |
+| `ADAPTER_MAX_CRAWL_PATH_LENGTH` | `256` | 单条路径规则最大字符数 |
+| `ADAPTER_MAX_ACTIVE_CRAWLS` | `4` | 同时执行的 Crawl 数 |
+| `ADAPTER_MAX_QUEUED_CRAWLS` | `16` | 等待执行的 Crawl 数 |
+| `ADAPTER_MAX_JOBS` | `100` | 最大保留终态任务数 |
+| `ADAPTER_JOB_TTL` | `3600` | 终态任务保留时长（秒） |
 | `ADAPTER_MAX_BODY_BYTES` | `2097152` | 请求体最大字节数 |
 | `SEARXNG_PROXY` | `""` | SearXNG 代理（留空=无代理） |
 

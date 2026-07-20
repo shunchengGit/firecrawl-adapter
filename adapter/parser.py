@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import threading
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import html2text
@@ -54,16 +55,34 @@ def get_meta(soup: BeautifulSoup, name: str) -> str:
     return ""
 
 
-def match_path(url: str, patterns: list[str] | None) -> bool:
+@dataclass(frozen=True)
+class CompiledPathPattern:
+    source: str
+    regex: re.Pattern[str] | None
+
+
+def compile_path_patterns(patterns: tuple[str, ...]) -> tuple[CompiledPathPattern, ...]:
+    """Compile literal path globs; only ``*`` has wildcard meaning."""
+    compiled = []
+    for pattern in patterns:
+        regex = None
+        if "*" in pattern:
+            source = re.escape(pattern).replace(r"\*", ".*")
+            regex = re.compile(source)
+        compiled.append(CompiledPathPattern(source=pattern, regex=regex))
+    return tuple(compiled)
+
+
+def match_path(url: str, patterns: tuple[CompiledPathPattern, ...] | None) -> bool:
     if not patterns:
         return True
     path = urlparse(url).path
-    for pat in patterns:
-        if pat.startswith("/") and path.startswith(pat):
-            return True
-        if "*" in pat and re.match(pat.replace("*", ".*"), path):
-            return True
-    return False
+    return any(
+        pattern.regex.match(path) is not None
+        if pattern.regex is not None
+        else path.startswith(pattern.source)
+        for pattern in patterns
+    )
 
 
 def html_to_markdown(html: str, max_chars: int) -> str:

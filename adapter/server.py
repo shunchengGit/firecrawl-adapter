@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import handlers
 from .config import config
 from .fetcher import check_searxng
-from .jobs import mark_all_running_cancelled
+from .jobs import shutdown_crawl_dispatcher
 
 logging.basicConfig(level=logging.WARNING, format="[adapter] %(message)s")
 _log = logging.getLogger("adapter")
@@ -119,7 +119,7 @@ def main() -> None:
 
     def _shutdown(signum, frame):
         _log.warning("收到信号 %s，优雅关闭中...", signum)
-        n = mark_all_running_cancelled()
+        n = shutdown_crawl_dispatcher(wait=False)
         if n:
             _log.warning("已标记 %d 个运行中 crawl 为 cancelled", n)
         # 关 agent-browser daemon，触发 session cookie 落盘

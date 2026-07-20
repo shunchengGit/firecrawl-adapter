@@ -4,6 +4,7 @@ from __future__ import annotations
 from bs4 import BeautifulSoup
 
 from adapter.parser import (
+    compile_path_patterns,
     extract_main,
     get_meta,
     html_to_markdown,
@@ -13,17 +14,25 @@ from adapter.parser import (
 
 def test_match_path_no_patterns_matches_all():
     assert match_path("https://example.com/any/path", None) is True
-    assert match_path("https://example.com/any/path", []) is True
+    assert match_path("https://example.com/any/path", ()) is True
 
 
 def test_match_path_prefix_match():
-    assert match_path("https://example.com/blog/post-1", ["/blog"]) is True
-    assert match_path("https://example.com/about", ["/blog"]) is False
+    patterns = compile_path_patterns(("/blog",))
+    assert match_path("https://example.com/blog/post-1", patterns) is True
+    assert match_path("https://example.com/about", patterns) is False
 
 
 def test_match_path_wildcard():
-    assert match_path("https://example.com/docs/2024/x", ["/docs/*"]) is True
-    assert match_path("https://example.com/api/v1", ["/docs/*"]) is False
+    patterns = compile_path_patterns(("/docs/*",))
+    assert match_path("https://example.com/docs/2024/x", patterns) is True
+    assert match_path("https://example.com/api/v1", patterns) is False
+
+
+def test_match_path_regex_metacharacters_are_literal():
+    patterns = compile_path_patterns(("/a.b+[](",))
+    assert match_path("https://example.com/a.b+[](/child", patterns) is True
+    assert match_path("https://example.com/axb", patterns) is False
 
 
 def test_get_meta_by_name():

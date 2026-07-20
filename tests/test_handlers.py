@@ -1,9 +1,13 @@
 """Tests for handler-level validation logic (no network calls)."""
 from __future__ import annotations
 
+import dataclasses
+import threading
 from unittest.mock import patch
 
 from adapter import handlers
+from adapter.config import config
+from adapter.jobs import CrawlDispatcher, reset_crawl_dispatcher_for_tests
 
 
 def test_search_missing_query():
@@ -145,7 +149,116 @@ def test_scrape_missing_url():
 def test_start_crawl_missing_url():
     res = handlers.handle_start_crawl({})
     assert res["success"] is False
+    assert res["code"] == "invalid_crawl_request"
     assert "Missing url" in res["error"]
+
+
+def test_parse_crawl_request_defaults_and_boundaries():
+    request = handlers.parse_crawl_request({"url": "https://example.com"})
+    assert request.limit == config.crawl_default_limit
+    assert request.max_depth == config.crawl_default_depth
+
+    request = handlers.parse_crawl_request({
+        "url": "https://example.com",
+        "limit": config.max_crawl_limit,
+        "maxDiscoveryDepth": 0,
+    })
+    assert request.limit == config.max_crawl_limit
+    assert request.max_depth == 0
+
+
+def test_parse_crawl_request_compiles_path_filters():
+    request = handlers.parse_crawl_request({
+        "url": "https://example.com",
+        "includePaths": ["/docs/*", "/a.b+[]("],
+        "excludePaths": ["/private"],
+    })
+    assert len(request.include_paths) == 2
+    assert request.include_paths[0].regex is not None
+    assert request.include_paths[1].source == "/a.b+[]("
+
+
+def test_parse_crawl_request_rejects_invalid_numeric_values():
+    for value in (True, "10", 1.5, None):
+        res = handlers.handle_start_crawl({"url": "https://example.com", "limit": value})
+        assert res["success"] is False
+        assert res["code"] == "invalid_crawl_request"
+
+    res = handlers.handle_start_crawl({
+        "url": "https://example.com",
+        "maxDiscoveryDepth": config.max_crawl_depth + 1,
+    })
+    assert res["success"] is False
+    assert res["code"] == "invalid_crawl_request"
+
+
+def test_parse_crawl_request_rejects_invalid_path_filters():
+    invalid = (
+        None,
+        "/docs",
+        [1],
+        ["relative"],
+        ["/x"] * (config.max_crawl_path_filters + 1),
+        ["/" + "x" * config.max_crawl_path_length],
+    )
+    for value in invalid:
+        res = handlers.handle_start_crawl({
+            "url": "https://example.com",
+            "includePaths": value,
+        })
+        assert res["success"] is False
+        assert res["code"] == "invalid_crawl_request"
+
+
+def test_start_crawl_capacity_error_is_identifiable():
+    started = threading.Event()
+    release = threading.Event()
+    settings = dataclasses.replace(config, max_active_crawls=1, max_queued_crawls=0)
+
+    def scrape(url, **kwargs):
+        started.set()
+        assert release.wait(2)
+        return {"markdown": "ok", "links": []}
+
+    dispatcher = reset_crawl_dispatcher_for_tests(settings=settings, scrape=scrape)
+    first = handlers.handle_start_crawl({"url": "https://example.com", "limit": 1})
+    assert first["success"] is True
+    assert started.wait(1)
+    second = handlers.handle_start_crawl({"url": "https://example.com/two", "limit": 1})
+    assert second == {
+        "success": False,
+        "code": "crawl_capacity_exhausted",
+        "error": "Crawl capacity exhausted",
+    }
+    release.set()
+    dispatcher.shutdown(wait=True)
+    reset_crawl_dispatcher_for_tests()
+
+
+def test_crawl_status_exposes_progress_and_terminal_expiry():
+    dispatcher = CrawlDispatcher(settings=config, scrape=lambda url, **kwargs: {
+        "markdown": "ok",
+        "links": [],
+    })
+    job_id = dispatcher.submit(handlers.parse_crawl_request({
+        "url": "https://example.com",
+        "limit": 1,
+    }))
+    import time
+
+    deadline = time.monotonic() + 1
+    while dispatcher.snapshot(job_id).status != "completed" and time.monotonic() < deadline:
+        time.sleep(0.005)
+    with patch("adapter.handlers.get_job", side_effect=dispatcher.snapshot):
+        res = handlers.handle_crawl_status(job_id)
+    assert res["status"] == "completed"
+    assert res["completed"] == 1
+    assert res["total"] == res["discovered"] == 1
+    assert res["queued"] == 0
+    assert res["failed"] == 0
+    assert res["skipped"] == 0
+    assert res["expiresAt"].endswith("Z")
+    dispatcher.shutdown(wait=True)
 
 
 def test_crawl_status_unknown_job():

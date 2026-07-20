@@ -8,6 +8,7 @@ from http.server import ThreadingHTTPServer
 import httpx
 import pytest
 
+from adapter.jobs import reset_crawl_dispatcher_for_tests, shutdown_crawl_dispatcher
 from adapter.server import Adapter, main  # noqa: F401
 
 
@@ -33,9 +34,14 @@ def _running_server(port: int):
 
 @pytest.fixture
 def base_url():
+    reset_crawl_dispatcher_for_tests()
     port = _free_port()
-    with _running_server(port) as url:
-        yield url
+    try:
+        with _running_server(port) as url:
+            yield url
+    finally:
+        shutdown_crawl_dispatcher(wait=True)
+        reset_crawl_dispatcher_for_tests()
 
 
 def test_health_endpoint(base_url):
@@ -89,6 +95,18 @@ def test_invalid_json_returns_400(base_url):
     assert resp.status_code == 400
     body = resp.json()
     assert "Invalid JSON" in body["error"]
+
+
+def test_crawl_submission_rejects_invalid_types(base_url):
+    resp = httpx.post(
+        f"{base_url}/v2/crawl",
+        json={"url": "https://example.com", "limit": "10"},
+        timeout=5,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert body["code"] == "invalid_crawl_request"
 
 
 def test_crawl_status_unknown_job(base_url):
