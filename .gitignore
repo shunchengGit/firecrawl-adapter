@@ -51,3 +51,8 @@ docker-compose.override.yml
 # Crawl job scratch
 /tmp/
 searxng/settings.yml
+
+# Local OpenSpec tooling and change artifacts
+.claude/commands/opsx/
+.claude/skills/openspec-*/
+openspec/
