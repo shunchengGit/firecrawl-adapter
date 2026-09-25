@@ -27,10 +27,15 @@ ui:
   default_theme: simple
   default_locale: ""
 
-# 引擎选择：8个稳定引擎，去掉持续 CAPTCHA 的百度/搜狗
+# 引擎选择：9 个稳定引擎。原生 google 与 startpage（需解 Anubis POW，且代理出口
+# 实测持续触发 CAPTCHA）均禁用；补充国内 Quark 与实测稳定的 fynd（fynd.bot）聚合。
+# zapmeta 因代理出口 IP 被其风控（unusual traffic）暂不启用，定义保留便于日后恢复。
 engines:
   # 国内引擎
   - name: 360search
+    disabled: false
+    timeout: 15.0
+  - name: quark
     disabled: false
     timeout: 15.0
 
@@ -39,13 +44,19 @@ engines:
     disabled: false
     timeout: 15.0
   - name: google
-    disabled: false
-    timeout: 20.0
+    disabled: true
+  - name: startpage
+    disabled: true
   - name: duckduckgo
     disabled: true
   - name: wikipedia
     disabled: false
     timeout: 10.0
+
+  # fynd（fynd.bot 聚合）：连发 7 轮全部稳定，中英文均相关，抗风控表现最好
+  - name: fynd
+    disabled: false
+    timeout: 15.0
 
   # 直连可用
   - name: yandex
@@ -64,8 +75,6 @@ engines:
     disabled: true
   - name: brave
     disabled: true
-  - name: startpage
-    disabled: true
   - name: qwant
     disabled: true
   - name: wikidata
@@ -78,6 +87,26 @@ engines:
     disabled: true
   - name: naver
     disabled: true
+
+  # zapmeta：2026.5.16 镜像默认配置无此条目，需内联完整 xpath 定义。
+  # 当前代理出口 IP 被其风控（unusual traffic），暂禁用；解除后可改回 disabled: false。
+  - name: zapmeta
+    engine: xpath
+    shortcut: zpm
+    categories: general
+    search_url: https://www.zapmeta.com/search?q={query}&pg={pageno}
+    results_xpath: //article[contains(@class, "organic-results-item")]
+    url_xpath: ./h2/a/@href
+    title_xpath: ./h2
+    content_xpath: ./p
+    paging: true
+    disabled: true
+    timeout: 15.0
+    about:
+      website: https://www.zapmeta.com/
+      use_official_api: false
+      require_api_key: false
+      results: HTML
 
 outgoing:
   request_timeout: 20.0

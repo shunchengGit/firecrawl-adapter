@@ -54,16 +54,25 @@ fi
 
 echo
 echo "=== 端到端测试 (adapter → SearXNG) ==="
-# 只测 adapter health（需 SearXNG 在线才能返回 ok）
-HEALTH_JSON=$(curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" 2>/dev/null || echo '')
-if echo "${HEALTH_JSON}" | grep -q '"status":"ok"'; then
-    echo "  ✓ adapter + SearXNG 链路正常"
-elif echo "${HEALTH_JSON}" | grep -q '"status":"degraded"'; then
-    echo "  ⚠ adapter 在线但 SearXNG 不可达（degraded）"
-elif echo "${HEALTH_JSON}" | grep -q '"status"'; then
-    echo "  ⚠ adapter 返回异常: ${HEALTH_JSON}"
+# 真实端到端：走 adapter 发一次搜索（比只看 health 更能证明链路可用）
+SEARCH_OUT=$(curl -sf -m 60 -X POST "http://127.0.0.1:${ADAPTER_PORT}/v2/search" \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"firecrawl adapter health check","limit":3}' 2>/dev/null || echo '')
+SEARCH_N=$(echo "${SEARCH_OUT}" | python3 -c "import json,sys
+try: print(len(json.load(sys.stdin).get('data',{}).get('web',[])))
+except Exception: print(0)" 2>/dev/null || echo 0)
+if [ "${SEARCH_N}" -gt 0 ] 2>/dev/null; then
+    echo "  ✓ adapter → SearXNG 搜索链路正常（返回 ${SEARCH_N} 条结果）"
 else
-    echo "  ✗ adapter 不可达，无法测试链路"
+    # 搜索失败时降级看 health
+    HEALTH_JSON=$(curl -sf "http://127.0.0.1:${ADAPTER_PORT}/healthz" 2>/dev/null || echo '')
+    if echo "${HEALTH_JSON}" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+        echo "  ⚠ health 正常但搜索未返回结果"
+    elif echo "${HEALTH_JSON}" | grep -q '"status"'; then
+        echo "  ⚠ adapter 返回异常: ${HEALTH_JSON}"
+    else
+        echo "  ✗ adapter 不可达，无法测试链路"
+    fi
 fi
 
 echo
