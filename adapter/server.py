@@ -28,15 +28,20 @@ class Adapter(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         if n == 0:
             return {}
+        if n < 0:
+            raise ValueError("Invalid Content-Length")
         if n > config.max_body_bytes:
             raise ValueError(
                 f"Request body too large: {n} bytes (max {config.max_body_bytes})"
             )
         raw = self.rfile.read(n)
         try:
-            return json.loads(raw)
+            data = json.loads(raw)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON: {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError("Request body must be a JSON object")
+        return data
 
     def _json(self, code: int, data: dict) -> None:
         self.send_response(code)

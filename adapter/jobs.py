@@ -14,7 +14,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from .config import Config, config
-from .fetcher import scrape_url
+from .fetcher import FAILURE_STATUSES, scrape_url
 from .parser import CompiledPathPattern, match_path
 
 _log = logging.getLogger("adapter")
@@ -269,6 +269,10 @@ ScrapeCallable = Callable[..., dict]
 
 
 def _is_fetch_failure(document: dict) -> bool:
+    """按抓取有效性分类判断失败，不再只靠 Markdown 前缀字符串。"""
+    metadata = document.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("scrapeStatus") in FAILURE_STATUSES:
+        return True
     markdown = document.get("markdown")
     return isinstance(markdown, str) and markdown.startswith("[fetch failed:")
 
@@ -409,7 +413,9 @@ class CrawlDispatcher:
             self._accepting = False
             cancelled = self.store.cancel_all_unfinished()
             self._pending.clear()
-            for future in self._futures.values():
+            # cancel() 会在本线程同步触发 done callback（其中 pop _futures），
+            # 必须遍历快照，否则字典在迭代中被修改
+            for future in list(self._futures.values()):
                 future.cancel()
             executor = self._executor
             self._executor = None

@@ -38,6 +38,13 @@ class Config:
     max_queued_crawls: int
     searxng_engines: str
     searxng_categories: str
+    searxng_disabled_engines: str
+    search_max_rounds: int
+    scrape_default_timeout_ms: int
+    scrape_max_timeout_ms: int
+    search_scrape_max_pages: int
+    max_pdf_bytes: int
+    max_pdf_pages: int
 
     @classmethod
     def from_env(cls) -> Config:
@@ -63,6 +70,17 @@ class Config:
             max_queued_crawls=int(os.getenv("ADAPTER_MAX_QUEUED_CRAWLS", "16")),
             searxng_engines=os.getenv("SEARXNG_ENGINES", ""),
             searxng_categories=os.getenv("SEARXNG_CATEGORIES", "general"),
+            # 实测异常引擎可在此局部隔离（逗号分隔），不修改 SearXNG 模板
+            searxng_disabled_engines=os.getenv("SEARXNG_DISABLED_ENGINES", ""),
+            # 搜索轮次上限：1 = 只首轮，2 = 首轮 + 一次有限补搜
+            search_max_rounds=int(os.getenv("ADAPTER_SEARCH_MAX_ROUNDS", "2")),
+            # Firecrawl timeout/waitFor 单位为毫秒
+            scrape_default_timeout_ms=int(os.getenv("ADAPTER_SCRAPE_DEFAULT_TIMEOUT_MS", "30000")),
+            scrape_max_timeout_ms=int(os.getenv("ADAPTER_SCRAPE_MAX_TIMEOUT_MS", "120000")),
+            # search + scrapeOptions 组合模式最多抓取的候选页数
+            search_scrape_max_pages=int(os.getenv("ADAPTER_SEARCH_SCRAPE_MAX_PAGES", "3")),
+            max_pdf_bytes=int(os.getenv("ADAPTER_MAX_PDF_BYTES", str(20 * 1024 * 1024))),
+            max_pdf_pages=int(os.getenv("ADAPTER_MAX_PDF_PAGES", "100")),
         )
 
 

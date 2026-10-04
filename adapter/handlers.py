@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import logging
-import time
 import uuid
 from datetime import datetime, timezone
 
 from .config import Config, config
-from .fetcher import bing_search, compile_search_query, map_url, scrape_url, searxng_search
+from .fetcher import (
+    SCRAPE_OK,
+    SCRAPE_PARTIAL,
+    bing_search,
+    compile_search_query,
+    filter_results,
+    map_url,
+    scrape_url_result,
+    searxng_search,
+    strip_internal_fields,
+)
 from .jobs import (
     CrawlCapacityError,
     CrawlDispatcherStoppedError,
@@ -17,6 +26,7 @@ from .jobs import (
     submit_crawl,
 )
 from .parser import compile_path_patterns
+from .ranking import build_variant_query, has_sufficient_quality, rerank_results
 
 _log = logging.getLogger("adapter")
 
@@ -25,6 +35,16 @@ _SOURCE_CATEGORY: dict[str, str] = {
     "web": "general",
     "news": "news",
     "images": "images",
+}
+
+# 抓取失败分类 → 可识别错误码（T06）
+_SCRAPE_ERROR_CODES = {
+    "not_found": "page_not_found",
+    "restricted": "access_restricted",
+    "incomplete": "content_incomplete",
+    "unsupported": "unsupported_format",
+    "network_error": "fetch_failed",
+    "timeout": "scrape_timeout",
 }
 
 
@@ -40,6 +60,55 @@ def _map_sources_to_categories(sources: list | None) -> str:
     return ",".join(cats) if cats else config.searxng_categories
 
 
+def _search_once(query: str, fetch_limit: int, categories: str, language: str | None) -> list[dict]:
+    """单轮搜索：SearXNG 优先，空结果时 Bing 兜底（同一编译 query）。"""
+    results = searxng_search(query, limit=fetch_limit, categories=categories, language=language)
+    if not results:
+        _log.info("SearXNG returned 0 results, falling back to Bing")
+        results = bing_search(query, limit=fetch_limit)
+    return results
+
+
+def _attach_scraped_content(results: list[dict], scrape_opts: dict) -> None:
+    """search + scrapeOptions 组合模式（T11）：按排序依次抓取候选来源。
+
+    有界：最多抓取 search_scrape_max_pages 个候选；拿到一个有效正文即停止。
+    失败的候选保留可识别原因，不冒充成功。
+    """
+    timeout_ms = scrape_opts.get("timeout", config.scrape_default_timeout_ms)
+    if not isinstance(timeout_ms, (int, float)) or timeout_ms <= 0:
+        timeout_ms = config.scrape_default_timeout_ms
+    only_main = scrape_opts.get("onlyMainContent", True)
+    formats = scrape_opts.get("formats", ["markdown"])
+    if isinstance(formats, str):
+        formats = [formats]
+
+    attempts = 0
+    found_valid = False
+    for item in results:
+        if attempts >= config.search_scrape_max_pages or found_valid:
+            break
+        attempts += 1
+        result = scrape_url_result(
+            item["url"],
+            formats=formats,
+            only_main=only_main,
+            timeout_s=timeout_ms / 1000,
+        )
+        if result.ok and result.document is not None:
+            doc = result.document
+            for key in ("markdown", "html", "links", "metadata"):
+                if key in doc:
+                    item[key] = doc[key]
+            if result.status == SCRAPE_OK:
+                found_valid = True
+        else:
+            item["scrapeStatus"] = result.status
+            item["scrapeError"] = result.detail
+    if attempts:
+        _log.info("scrapeOptions: %d candidate(s) scraped, valid=%s", attempts, found_valid)
+
+
 def handle_search(body: dict) -> dict:
     q = body.get("query", "")
     if not q:
@@ -53,31 +122,45 @@ def handle_search(body: dict) -> dict:
     # 1. Compile domain filters into the query (site: / -site: ops)
     include_domains = body.get("includeDomains") or []
     exclude_domains = body.get("excludeDomains") or []
-    search_query = compile_search_query(q, include_domains, exclude_domains)
 
     # 2. Request 2× buffer to account for filtering / dedup loss
     fetch_limit = min(limit * 2, config.max_search_results * 2)
 
-    results = searxng_search(
-        search_query,
-        limit=fetch_limit,
-        categories=categories,
-        language=language,
-    )
+    # 3. 有限轮次：首轮不足时按保守变体补搜一次（T05）
+    collected: list[dict] = []
+    ranked = []
+    max_rounds = max(1, config.search_max_rounds)
+    for round_index in range(max_rounds):
+        if round_index == 0:
+            round_query = q
+        else:
+            variant = build_variant_query(q)
+            if not variant:
+                break
+            round_query = variant
+            _log.info("Supplementary search round with variant: %r", variant)
 
-    # 3. SearXNG 返回空 → Bing 兜底
-    if not results:
-        _log.info("SearXNG returned 0 results, falling back to Bing")
-        bing_results = bing_search(q, limit=fetch_limit)
-        if bing_results:
-            results = bing_results
+        compiled = compile_search_query(round_query, include_domains, exclude_domains)
+        collected.extend(_search_once(compiled, fetch_limit, categories, language))
 
-    # 4. Slice to exact limit
-    results = results[:limit]
+        # 域名硬过滤 + URL 校验 + 去重（T03），过滤后再打分重排（T04）
+        filtered = filter_results(collected, include_domains, exclude_domains)
+        ranked = rerank_results(filtered, q)
+
+        if has_sufficient_quality(ranked, limit):
+            break
+
+    # 4. Slice to exact limit（过滤去重后再截取，不用无关结果凑数）
+    final_items = [s.item for s in ranked[:limit]]
+
+    # 5. 可选组合模式：抓取候选来源直到获得有效正文（T11）
+    scrape_opts = body.get("scrapeOptions")
+    if isinstance(scrape_opts, dict) and final_items:
+        _attach_scraped_content(final_items, scrape_opts)
 
     return {
         "success": True,
-        "data": {"web": results},
+        "data": {"web": strip_internal_fields(final_items)},
         "searchId": uuid.uuid4().hex,
     }
 
@@ -93,20 +176,38 @@ def handle_scrape(body: dict) -> dict:
         formats = scrape_opts.get("formats") if isinstance(scrape_opts, dict) else None
     if isinstance(formats, str):
         formats = [formats]
-    for attempt in range(3):
-        try:
-            doc = scrape_url(
-                url,
-                formats=formats,
-                only_main=only_main,
-                timeout=body.get("timeout", 15),
-            )
-            return {"success": True, "data": doc}
-        except Exception as e:
-            if attempt == 2:
-                return {"success": False, "error": f"Scrape failed: {e}"}
-            time.sleep(1)
-    return {"success": False, "error": "Scrape failed"}
+
+    # Firecrawl timeout/waitFor 单位为毫秒（T07）
+    timeout_ms = body.get("timeout", config.scrape_default_timeout_ms)
+    if not isinstance(timeout_ms, (int, float)) or isinstance(timeout_ms, bool) or timeout_ms <= 0:
+        return {"success": False, "error": "timeout must be a positive number (milliseconds)"}
+    timeout_ms = min(timeout_ms, config.scrape_max_timeout_ms)
+
+    wait_ms = body.get("waitFor", 0)
+    if not isinstance(wait_ms, (int, float)) or isinstance(wait_ms, bool) or wait_ms < 0:
+        return {"success": False, "error": "waitFor must be a non-negative number (milliseconds)"}
+
+    result = scrape_url_result(
+        url,
+        formats=formats,
+        only_main=only_main,
+        timeout_s=timeout_ms / 1000,
+        wait_ms=int(wait_ms),
+    )
+
+    if result.ok:
+        response: dict = {"success": True, "data": result.document}
+        if result.status == SCRAPE_PARTIAL:
+            # 部分结果明确标注，不冒充完整正文
+            response["warning"] = result.detail or "partial content"
+        return response
+
+    code = _SCRAPE_ERROR_CODES.get(result.status, "fetch_failed")
+    return {
+        "success": False,
+        "code": code,
+        "error": result.detail or f"Scrape failed: {result.status}",
+    }
 
 
 class CrawlValidationError(ValueError):
@@ -235,18 +336,32 @@ def handle_cancel_crawl(job_id: str) -> dict:
 
 
 def handle_extract(body: dict) -> dict:
-    """Minimal extract — scrape listed URLs without AI processing."""
+    """Minimal extract — scrape listed URLs without AI processing.
+
+    部分 URL 失败时保留其他成功内容，并明确标注哪些失败（T06）。
+    """
     urls = body.get("urls", [])
     if not urls:
         return {"success": False, "error": "Missing urls"}
     docs = []
+    failed: list[str] = []
     for url in urls[:5]:
-        try:
-            docs.append(scrape_url(url, formats=["markdown"]))
-        except Exception as e:
-            _log.warning("Extract failed for %s: %s", url, e)
-            docs.append({"url": url, "markdown": "", "error": "fetch failed"})
-    return {"success": True, "data": docs}
+        result = scrape_url_result(url, formats=["markdown"])
+        if result.ok and result.document is not None:
+            docs.append(result.document)
+        else:
+            _log.warning("Extract failed for %s: %s", url, result.detail)
+            failed.append(url)
+            docs.append({
+                "metadata": {"url": url, "scrapeStatus": result.status},
+                "markdown": "",
+                "error": result.detail or result.status,
+            })
+    response: dict = {"success": True, "data": docs}
+    if failed:
+        response["warning"] = f"{len(failed)} url(s) failed"
+        response["failedUrls"] = failed
+    return response
 
 
 def handle_map(body: dict) -> dict:

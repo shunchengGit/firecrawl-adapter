@@ -306,6 +306,24 @@ def test_worker_treats_synthetic_fetch_failure_as_failure():
     dispatcher.shutdown(wait=True)
 
 
+def test_worker_treats_classified_failure_status_as_failure():
+    """metadata.scrapeStatus 标记的失败页不进入 data，failed 计数增加。"""
+    dispatcher = CrawlDispatcher(
+        settings=_settings(),
+        scrape=lambda url, **kwargs: {
+            "markdown": "页面不存在或已删除",
+            "metadata": {"scrapeStatus": "not_found"},
+            "links": [],
+        },
+    )
+    job_id = dispatcher.submit(_request(limit=1))
+    final = _wait_for_status(dispatcher, job_id, "completed")
+    assert final.completed == 0
+    assert final.failed == 1
+    assert final.data == ()
+    dispatcher.shutdown(wait=True)
+
+
 def test_timeout_freezes_progress_after_inflight_fetch():
     started = threading.Event()
     release = threading.Event()

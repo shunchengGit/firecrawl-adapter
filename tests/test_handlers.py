@@ -146,6 +146,220 @@ def test_scrape_missing_url():
     assert "Missing url" in res["error"]
 
 
+# T03: 域名硬约束与去重
+
+
+def test_search_include_domains_hard_filtered():
+    """includeDomains 是本地硬约束，不只是上游 site: 提示。"""
+    mock_results = [
+        {"title": "uv pip compile docs", "url": "https://docs.astral.sh/uv/pip/compile/", "content": "uv pip compile"},
+        {"title": "uv index", "url": "https://uvi.today/uv-index-la", "content": "uv pip compile"},
+    ]
+    with patch("adapter.handlers.searxng_search", return_value=mock_results):
+        res = handlers.handle_search({
+            "query": "uv pip compile",
+            "includeDomains": ["docs.astral.sh"],
+            "limit": 5,
+        })
+    urls = [r["url"] for r in res["data"]["web"]]
+    assert urls == ["https://docs.astral.sh/uv/pip/compile/"]
+
+
+def test_search_dedupes_and_strips_internal_fields():
+    mock_results = [
+        {"title": "uv pip compile docs", "url": "https://docs.astral.sh/uv/pip/compile/", "content": "uv pip compile", "_engines": ["yandex"]},
+        {"title": "dup", "url": "https://docs.astral.sh/uv/pip/compile/#top", "content": "uv pip compile", "_engines": ["bing"]},
+    ]
+    with patch("adapter.handlers.searxng_search", return_value=mock_results):
+        res = handlers.handle_search({"query": "uv pip compile", "limit": 5})
+    web = res["data"]["web"]
+    assert len(web) == 1
+    assert "_engines" not in web[0]
+    assert "_diag" not in web[0]
+
+
+def test_search_bing_fallback_uses_compiled_query():
+    """Bing fallback 必须使用与 SearXNG 相同的编译 query，不丢域名约束。"""
+    with (
+        patch("adapter.handlers.searxng_search", return_value=[]),
+        patch("adapter.handlers.bing_search", return_value=[]) as mock_bing,
+    ):
+        handlers.handle_search({
+            "query": "uv pip compile",
+            "includeDomains": ["docs.astral.sh"],
+            "limit": 5,
+        })
+    assert mock_bing.called
+    assert "site:docs.astral.sh" in mock_bing.call_args[0][0]
+
+
+# T05: 有限补搜
+
+
+def test_search_supplementary_round_on_low_quality():
+    """首轮结果无关时触发一次补搜；补搜 query 保留域名约束。"""
+    junk = [{"title": "unrelated thing", "url": "https://x.example.com/", "content": "nothing"}]
+    good = [{
+        "title": "agent-browser sessions",
+        "url": "https://agent-browser.dev/sessions",
+        "content": "agent-browser session-name cookie persistence",
+    }]
+    with patch("adapter.handlers.searxng_search", side_effect=[junk, good]) as mock_search:
+        res = handlers.handle_search({
+            "query": "agent-browser session-name cookie persistence",
+            "limit": 3,
+        })
+    assert mock_search.call_count == 2
+    # 补搜变体带引号精确匹配
+    assert '"agent-browser"' in mock_search.call_args_list[1][0][0]
+    assert res["data"]["web"][0]["url"] == "https://agent-browser.dev/sessions"
+
+
+def test_search_no_supplementary_round_when_quality_sufficient():
+    good = [
+        {
+            "title": "agent-browser sessions",
+            "url": f"https://agent-browser.dev/sessions-{i}",
+            "content": "agent-browser session-name cookie persistence",
+        }
+        for i in range(3)
+    ]
+    with patch("adapter.handlers.searxng_search", return_value=good) as mock_search:
+        handlers.handle_search({
+            "query": "agent-browser session-name cookie persistence",
+            "limit": 3,
+        })
+    assert mock_search.call_count == 1
+
+
+# T11: search + scrapeOptions 组合模式
+
+
+def _scrape_result(status, markdown=None, detail=""):
+    from adapter.fetcher import ScrapeResult
+
+    doc = None
+    if markdown is not None:
+        doc = {"markdown": markdown, "metadata": {"scrapeStatus": status}, "links": []}
+    return ScrapeResult(url="u", final_url="u", status=status, document=doc, detail=detail)
+
+
+def test_search_scrape_options_tries_next_candidate_on_failure():
+    candidates = [
+        {"title": "agent-browser sessions a", "url": "https://agent-browser.dev/a", "content": "agent-browser session-name"},
+        {"title": "agent-browser sessions b", "url": "https://agent-browser.dev/b", "content": "agent-browser session-name"},
+    ]
+    scrape_side_effects = [
+        _scrape_result("restricted", detail="login required"),
+        _scrape_result("ok", markdown="有效正文"),
+    ]
+    with (
+        patch("adapter.handlers.searxng_search", return_value=candidates),
+        patch("adapter.handlers.scrape_url_result", side_effect=scrape_side_effects) as mock_scrape,
+    ):
+        res = handlers.handle_search({
+            "query": "agent-browser session-name",
+            "limit": 2,
+            "scrapeOptions": {"formats": ["markdown"]},
+        })
+    assert mock_scrape.call_count == 2
+    first, second = res["data"]["web"]
+    assert first["scrapeStatus"] == "restricted"
+    assert first["scrapeError"] == "login required"
+    assert second["markdown"] == "有效正文"
+
+
+def test_search_scrape_options_stops_after_first_valid():
+    candidates = [
+        {"title": "agent-browser sessions a", "url": "https://agent-browser.dev/a", "content": "agent-browser session-name"},
+        {"title": "agent-browser sessions b", "url": "https://agent-browser.dev/b", "content": "agent-browser session-name"},
+    ]
+    with (
+        patch("adapter.handlers.searxng_search", return_value=candidates),
+        patch(
+            "adapter.handlers.scrape_url_result",
+            return_value=_scrape_result("ok", markdown="有效正文"),
+        ) as mock_scrape,
+    ):
+        res = handlers.handle_search({
+            "query": "agent-browser session-name",
+            "limit": 2,
+            "scrapeOptions": {},
+        })
+    assert mock_scrape.call_count == 1
+    assert res["data"]["web"][0]["markdown"] == "有效正文"
+
+
+# T06/T07: scrape 失败映射与毫秒超时
+
+
+def test_scrape_failure_returns_identifiable_code():
+    with patch(
+        "adapter.handlers.scrape_url_result",
+        return_value=_scrape_result("not_found", detail="HTTP 404"),
+    ):
+        res = handlers.handle_scrape({"url": "https://example.com/gone"})
+    assert res["success"] is False
+    assert res["code"] == "page_not_found"
+    assert "404" in res["error"]
+
+
+def test_scrape_partial_content_returns_warning():
+    with patch(
+        "adapter.handlers.scrape_url_result",
+        return_value=_scrape_result("partial", markdown="部分内容", detail="truncated"),
+    ):
+        res = handlers.handle_scrape({"url": "https://example.com/"})
+    assert res["success"] is True
+    assert res["warning"] == "truncated"
+    assert res["data"]["markdown"] == "部分内容"
+
+
+def test_scrape_timeout_is_milliseconds():
+    """timeout=15000 必须按 15 秒预算解释，不是 15000 秒。"""
+    with patch(
+        "adapter.handlers.scrape_url_result",
+        return_value=_scrape_result("ok", markdown="x"),
+    ) as mock_scrape:
+        res = handlers.handle_scrape({"url": "https://example.com/", "timeout": 15000})
+    assert res["success"] is True
+    assert mock_scrape.call_args[1]["timeout_s"] == 15.0
+
+
+def test_scrape_wait_for_passed_through():
+    with patch(
+        "adapter.handlers.scrape_url_result",
+        return_value=_scrape_result("ok", markdown="x"),
+    ) as mock_scrape:
+        handlers.handle_scrape({"url": "https://example.com/", "waitFor": 3000})
+    assert mock_scrape.call_args[1]["wait_ms"] == 3000
+
+
+def test_scrape_invalid_timeout_rejected():
+    for bad in (-1, 0, "15000", True):
+        res = handlers.handle_scrape({"url": "https://example.com/", "timeout": bad})
+        assert res["success"] is False
+        assert "timeout" in res["error"]
+
+
+def test_extract_marks_failed_urls():
+    from adapter.fetcher import ScrapeResult
+
+    def fake_scrape(url, **kwargs):
+        if "bad" in url:
+            return ScrapeResult(url=url, final_url=url, status="not_found", detail="HTTP 404")
+        return ScrapeResult(
+            url=url, final_url=url, status="ok",
+            document={"markdown": "ok", "metadata": {}},
+        )
+
+    with patch("adapter.handlers.scrape_url_result", side_effect=fake_scrape):
+        res = handlers.handle_extract({"urls": ["https://good.example.com", "https://bad.example.com"]})
+    assert res["success"] is True
+    assert res["failedUrls"] == ["https://bad.example.com"]
+    assert len(res["data"]) == 2
+
+
 def test_start_crawl_missing_url():
     res = handlers.handle_start_crawl({})
     assert res["success"] is False
